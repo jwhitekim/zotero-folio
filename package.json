@@ -1,0 +1,20 @@
+{
+  "name": "zotero-insight",
+  "version": "0.1.0",
+  "description": "Zotero 라이브러리 위에 AI 요약과 의미 검색을 얹는 개인용 도구",
+  "type": "module",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google/genai": "^0.15.0",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pdf-parse": "^1.1.1"
+  }
+}
