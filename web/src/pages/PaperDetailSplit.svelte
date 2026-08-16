@@ -24,6 +24,13 @@
     pdfZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((pdfZoom + delta) * 100) / 100));
   }
 
+  // Ctrl/Cmd + 스크롤(트랙패드 핀치도 대부분 브라우저에서 이걸로 들어옴)로 확대/축소.
+  function onPdfWheel(e) {
+    if (!paper?.hasPdf || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    changeZoom(e.deltaY < 0 ? 0.08 : -0.08);
+  }
+
   async function load() {
     loading = true;
     error = '';
@@ -81,32 +88,34 @@
       <section class="split-pdf-pane" aria-label="PDF 원문">
         <div class="pdf-pane-toolbar">
           <div><span class="toolbar-icon"><Icon name="file" size={17} /></span><strong>PDF 원문</strong></div>
-          {#if paper.hasPdf}
-            <div class="pdf-zoom-controls" aria-label="PDF 확대 및 축소">
-              <button onclick={() => changeZoom(-0.15)} disabled={pdfZoom <= MIN_ZOOM} aria-label="PDF 축소">−</button>
-              <button class="zoom-value" onclick={() => (pdfZoom = 1)} aria-label="화면 너비에 맞추기">
-                {Math.round(pdfZoom * 100)}%
-              </button>
-              <button onclick={() => changeZoom(0.15)} disabled={pdfZoom >= MAX_ZOOM} aria-label="PDF 확대">
-                <Icon name="plus" size={14} />
-              </button>
-            </div>
-          {/if}
-          {#if paper.hasPdf}
-            <a href={`/api/papers/${itemKey}/pdf`} target="_blank" rel="noopener">
-              새 창에서 열기 <Icon name="external" size={15} />
-            </a>
-          {/if}
-          <button
-            class="note-collapse-toggle"
-            onclick={() => (noteCollapsed = !noteCollapsed)}
-            aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
-            aria-pressed={noteCollapsed}
-          >
-            <Icon name="panel" size={16} />
-          </button>
+          <div class="pdf-toolbar-actions">
+            {#if paper.hasPdf}
+              <div class="pdf-zoom-controls" aria-label="PDF 확대 및 축소">
+                <button onclick={() => changeZoom(-0.15)} disabled={pdfZoom <= MIN_ZOOM} aria-label="PDF 축소">−</button>
+                <button class="zoom-value" onclick={() => (pdfZoom = 1)} aria-label="화면 너비에 맞추기">
+                  {Math.round(pdfZoom * 100)}%
+                </button>
+                <button onclick={() => changeZoom(0.15)} disabled={pdfZoom >= MAX_ZOOM} aria-label="PDF 확대">
+                  <Icon name="plus" size={14} />
+                </button>
+              </div>
+            {/if}
+            {#if paper.hasPdf}
+              <a href={`/api/papers/${itemKey}/pdf`} target="_blank" rel="noopener">
+                새 창에서 열기 <Icon name="external" size={15} />
+              </a>
+            {/if}
+            <button
+              class="note-collapse-toggle"
+              onclick={() => (noteCollapsed = !noteCollapsed)}
+              aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
+              aria-pressed={noteCollapsed}
+            >
+              <Icon name="panel" size={16} />
+            </button>
+          </div>
         </div>
-        <div class="pdf-scroll">
+        <div class="pdf-scroll" onwheel={onPdfWheel}>
           {#if paper.hasPdf}
             <PdfViewer src={`/api/papers/${itemKey}/pdf`} zoom={pdfZoom} />
           {:else}
