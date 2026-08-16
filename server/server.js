@@ -1,91 +1,214 @@
-// Express 라우트: POST /api/sync, GET /api/search, GET /api/papers.
-// sync 흐름(버전 diff → PDF 처리 → note 작성 → DB 저장)은 별도 파일 없이
-// 여기 doSync()에 둔다 (CLAUDE.md 아키텍처에 sync 전용 파일이 없음).
+// Express 라우트: 논문 목록/상세, 논문별 구조화 노트, 컬렉션, sync.
+// AI 요약/의미 검색/독립 메모는 걷어냈다 — 이 도구는 "Zotero 위 개인
+// 아카이브 + 직접 정리하는 구조화 노트" 도구다. 노트 원문은 로컬에
+// 캐시하지 않고 항상 Zotero에서 라이브로 읽는다 (db.js는 papers
+// 메타데이터 캐시만 담당).
 
 import 'dotenv/config';
 import express from 'express';
+import path from 'node:path';
 
-import { getLastVersion, setLastVersion, isItemProcessed, saveProcessedItem, listProcessedItems } from './db.js';
-import { fetchChangedTopItems, findPdfAttachment, downloadAttachmentFile, createChildNote } from './zotero.js';
-import { extractText, summarizeWithGemini } from './summarize.js';
-import { embedDocument, searchSimilar } from './embeddings.js';
+import {
+  getLastVersion,
+  setLastVersion,
+  savePaper,
+  listPapers,
+  getPaper,
+  deletePaper,
+  listPapersByCollection,
+  getZoteroAuth,
+  setZoteroAuth,
+  clearZoteroAuth,
+} from './db.js';
+import {
+  fetchChangedTopItems,
+  fetchItem,
+  findPdfAttachment,
+  findChildNoteByTag,
+  createChildNote,
+  updateNote,
+  deleteItem,
+  listCollections,
+  downloadAttachmentFile,
+} from './zotero.js';
+import { getRequestToken, buildAuthorizeUrl, getAccessToken } from './oauth1.js';
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3002;
+const WEB_DIST = path.join(process.cwd(), 'web', 'dist');
+const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
+const CONSUMER_KEY = process.env.ZOTERO_CLIENT_KEY;
+const CONSUMER_SECRET = process.env.ZOTERO_CLIENT_SECRET;
 
-function buildNoteHtml(summary, tags) {
-  const items = summary.map((line) => `<li>${line}</li>`).join('\n    ');
-  return `<p><strong>AI 요약 (Zotero Insight)</strong></p>
-<ul>
-    ${items}
-</ul>
-<p>키워드: ${tags.join(', ')}</p>`;
+const MEMO_TAG = 'zotero-insight:memo';
+
+function extractAuthors(creators) {
+  if (!creators) return [];
+  return creators
+    .map((c) => c.name || [c.firstName, c.lastName].filter(Boolean).join(' '))
+    .filter(Boolean);
 }
 
-// 아이템 하나를 처리한다. 실패하면 로그만 남기고 null을 반환한다 (sync 전체를
-// 중단시키지 않음). PDF 없음 / 텍스트 추출 실패 / Claude·Voyage 실패 모두
-// 여기서 걸러진다.
-async function processItem(item) {
-  const itemKey = item.key;
-  const title = item.data.title || '(제목 없음)';
+function extractYear(dateStr) {
+  if (!dateStr) return null;
+  const match = dateStr.match(/\d{4}/);
+  return match ? match[0] : dateStr;
+}
 
-  try {
-    const attachmentKey = await findPdfAttachment(itemKey);
-    if (!attachmentKey) {
-      console.log(`[sync] 스킵 (PDF 없음): ${title}`);
-      return null;
-    }
+// 브라우저 커넥터로 저장된 webpage 아이템은 title에 페이지 <title> 태그가
+// 그대로 들어와 " | 저널명 | 출판사" 같은 꼬리가 붙는 경우가 있다. Zotero
+// 메타데이터에 이걸 대신할 깨끗한 필드가 없어서(websiteTitle 등이 비어
+// 있음) 표시용으로 휴리스틱 정제한다 — Zotero 원본 title은 안 건드림.
+function cleanTitle(title, itemType) {
+  if (itemType !== 'webpage' || !title) return title;
+  const idx = title.indexOf(' | ');
+  return idx > 0 ? title.slice(0, idx).trim() : title;
+}
 
-    const pdfBuffer = await downloadAttachmentFile(attachmentKey);
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
-    let text;
-    try {
-      text = await extractText(pdfBuffer);
-    } catch (err) {
-      console.log(`[sync] 스킵 (텍스트 추출 실패): ${title} - ${err.message}`);
-      return null;
-    }
+// 자유 서술형 텍스트를 Zotero note용 HTML 문단으로 변환 (줄바꿈 기준 분리).
+function paragraphsToHtml(text) {
+  const paragraphs = (text || '').split(/\n{2,}/).filter((p) => p.trim());
+  if (paragraphs.length === 0) return '<p></p>';
+  return paragraphs.map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('\n');
+}
 
-    const { summary, tags } = await summarizeWithGemini(text);
-    const vector = await embedDocument(`${title}\n${summary.join(' ')}\n${tags.join(', ')}`);
+// Zotero note HTML 조각을 화면에 보여줄 평문으로 되돌린다 (역변환).
+function noteHtmlToText(html) {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<\/?p>/gi, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
+}
 
-    // 위 단계가 전부 성공한 뒤에만 Zotero에 쓴다 (중복 note 방지).
-    const noteKey = await createChildNote(itemKey, buildNoteHtml(summary, tags), tags);
+// 항목(section) 배열 ↔ Zotero note HTML. 항목 제목/내용은 전부 사용자가
+// 직접 입력한 것 — 여기서 하는 일은 순수 서식 변환뿐, 생성하는 것 없음.
+function sectionsToNoteHtml(sections) {
+  return sections
+    .map(
+      ({ title, content }) =>
+        `<h3>${escapeHtml(title || '제목 없음')}</h3>\n${paragraphsToHtml(content)}`
+    )
+    .join('\n');
+}
 
-    saveProcessedItem({
-      itemKey,
-      itemVersion: item.version,
-      title,
-      summary,
-      tags,
-      noteKey,
-      vector,
-    });
-
-    console.log(`[sync] 처리 완료: ${title}`);
-    return { itemKey, title };
-  } catch (err) {
-    console.error(`[sync] 스킵 (오류): ${title} - ${err.message}`);
-    return null;
+function noteHtmlToSections(html) {
+  if (!html) return [];
+  const matches = [...html.matchAll(/<h3>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3>|$)/g)];
+  if (matches.length === 0) {
+    // 예전 형식(제목 없는 통짜 텍스트) 호환 — "메모" 항목 하나로 보여줌
+    const text = noteHtmlToText(html);
+    return text ? [{ title: '메모', content: text }] : [];
   }
+  return matches.map(([, title, body]) => ({
+    title: noteHtmlToText(title).trim(),
+    content: noteHtmlToText(body),
+  }));
 }
 
+// --- sync ------------------------------------------------------------------
+// papers 캐시만 갱신한다 (AI 처리 없음). 실패한 아이템은 로그만 남기고
+// 계속 진행 — 전체 sync가 하나의 실패로 중단되면 안 된다.
 async function doSync() {
   const lastVersion = getLastVersion();
   const { items, newVersion } = await fetchChangedTopItems(lastVersion);
 
-  const results = [];
+  let cached = 0;
   for (const item of items) {
-    if (isItemProcessed(item.key, item.version)) continue;
-    const result = await processItem(item);
-    if (result) results.push(result);
+    // /items/top은 standalone note/attachment도 포함할 수 있어 방어적으로 거른다.
+    if (item.data.itemType === 'attachment' || item.data.itemType === 'note') continue;
+
+    try {
+      const attachmentKey = await findPdfAttachment(item.key);
+      savePaper({
+        itemKey: item.key,
+        itemVersion: item.version,
+        title: cleanTitle(item.data.title, item.data.itemType) || '(제목 없음)',
+        authors: extractAuthors(item.data.creators),
+        year: extractYear(item.data.date),
+        attachmentKey,
+        collections: item.data.collections || [],
+      });
+      cached++;
+    } catch (err) {
+      console.error(`[sync] 캐시 실패: ${item.data.title} - ${err.message}`);
+    }
   }
 
   setLastVersion(newVersion);
-  return { checked: items.length, processed: results.length, items: results };
+  return { checked: items.length, cached };
 }
+
+// --- Zotero OAuth 로그인 --------------------------------------------------
+// request token과 secret은 /oauth/login → /oauth/callback 사이에서만 잠깐
+// 필요하다. 1인용 도구라 세션 저장소 없이 메모리 변수 하나로 충분하다.
+let pendingOAuth = null; // { token, secret }
+
+app.get('/oauth/login', async (req, res) => {
+  try {
+    const { oauthToken, oauthTokenSecret } = await getRequestToken({
+      consumerKey: CONSUMER_KEY,
+      consumerSecret: CONSUMER_SECRET,
+      callbackUrl: `${APP_BASE_URL}/oauth/callback`,
+    });
+    pendingOAuth = { token: oauthToken, secret: oauthTokenSecret };
+    res.redirect(buildAuthorizeUrl({ oauthToken, appName: 'Folio' }));
+  } catch (err) {
+    console.error('[oauth] request token 실패:', err.message);
+    res.status(500).send('Zotero 로그인 시작 실패: ' + err.message);
+  }
+});
+
+app.get('/oauth/callback', async (req, res) => {
+  const { oauth_token: oauthToken, oauth_verifier: oauthVerifier } = req.query;
+  if (!pendingOAuth || pendingOAuth.token !== oauthToken) {
+    return res.status(400).send('OAuth 세션이 만료되었습니다. 다시 시도해주세요.');
+  }
+  try {
+    const result = await getAccessToken({
+      consumerKey: CONSUMER_KEY,
+      consumerSecret: CONSUMER_SECRET,
+      oauthToken,
+      oauthTokenSecret: pendingOAuth.secret,
+      oauthVerifier,
+    });
+    // 문서에 따라 oauth_token_secret을 Zotero-API-Key로 사용한다.
+    setZoteroAuth({ token: result.oauthTokenSecret, userId: result.userId, username: result.username });
+    pendingOAuth = null;
+    res.redirect('/');
+  } catch (err) {
+    console.error('[oauth] access token 교환 실패:', err.message);
+    res.status(500).send('Zotero 로그인 완료 실패: ' + err.message);
+  }
+});
+
+app.get('/api/auth/status', (req, res) => {
+  const auth = getZoteroAuth();
+  res.json({ connected: !!auth, username: auth?.username || null });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  clearZoteroAuth();
+  res.json({ connected: false });
+});
+
+// Zotero 계정이 연결되지 않았으면 나머지 /api 라우트는 전부 막는다.
+app.use('/api', (req, res, next) => {
+  if (!getZoteroAuth()) {
+    return res.status(401).json({ error: 'Zotero 계정이 연결되지 않았습니다', loginUrl: '/oauth/login' });
+  }
+  next();
+});
 
 app.post('/api/sync', async (req, res) => {
   try {
@@ -97,24 +220,115 @@ app.post('/api/sync', async (req, res) => {
   }
 });
 
-app.get('/api/search', async (req, res) => {
-  const query = req.query.q;
-  if (!query) {
-    return res.status(400).json({ error: 'q 쿼리 파라미터가 필요합니다' });
-  }
+// --- papers ------------------------------------------------------------
+
+app.get('/api/papers', (req, res) => {
+  res.json(listPapers(req.query.q));
+});
+
+app.get('/api/papers/:key', async (req, res) => {
+  const paper = getPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
+
   try {
-    const results = await searchSimilar(query);
-    res.json(results);
+    const memoNote = await findChildNoteByTag(req.params.key, MEMO_TAG);
+    res.json({
+      ...paper,
+      memo: memoNote
+        ? {
+            noteKey: memoNote.key,
+            version: memoNote.version,
+            sections: noteHtmlToSections(memoNote.data.note),
+          }
+        : null,
+    });
   } catch (err) {
-    console.error('[search] 실패:', err.message);
+    console.error('[papers detail] 노트 조회 실패:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/papers', (req, res) => {
-  res.json(listProcessedItems());
+// 논문(Zotero 원본 아이템) 자체를 삭제한다. Zotero 휴지통으로 이동하며,
+// 자식 노트/첨부파일도 함께 딸려간다. 로컬 papers 캐시에서도 지운다.
+app.delete('/api/papers/:key', async (req, res) => {
+  if (!getPaper(req.params.key)) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
+
+  try {
+    const item = await fetchItem(req.params.key);
+    await deleteItem(req.params.key, item.version);
+    deletePaper(req.params.key);
+    res.status(204).end();
+  } catch (err) {
+    console.error('[papers delete] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/papers/:key/memo', async (req, res) => {
+  const { sections } = req.body;
+  if (!Array.isArray(sections)) {
+    return res.status(400).json({ error: 'sections(배열)가 필요합니다' });
+  }
+
+  try {
+    const existing = await findChildNoteByTag(req.params.key, MEMO_TAG);
+
+    if (sections.length === 0) {
+      // 항목을 전부 지우고 저장하면 빈 note를 남기지 않고 아예 삭제한다.
+      if (existing) await deleteItem(existing.key, existing.version);
+      return res.json({ noteKey: null });
+    }
+
+    const html = sectionsToNoteHtml(sections);
+    const saved = existing
+      ? await updateNote(existing.key, existing.version, html)
+      : await createChildNote(req.params.key, html, [MEMO_TAG]);
+    res.json({ noteKey: saved.key, version: saved.version });
+  } catch (err) {
+    console.error('[papers memo] 저장 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/papers/:key/pdf', async (req, res) => {
+  const paper = getPaper(req.params.key);
+  if (!paper?.attachmentKey) {
+    return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+  }
+  try {
+    const buffer = await downloadAttachmentFile(paper.attachmentKey);
+    res.set('Content-Type', 'application/pdf');
+    res.send(buffer);
+  } catch (err) {
+    console.error('[papers pdf] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 컬렉션 ------------------------------------------------------------
+
+app.get('/api/collections', async (req, res) => {
+  try {
+    const collections = await listCollections();
+    res.json(collections.map((c) => ({ key: c.key, name: c.data.name })));
+  } catch (err) {
+    console.error('[collections] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/collections/:key/papers', (req, res) => {
+  res.json(listPapersByCollection(req.params.key));
+});
+
+// web/(Svelte 빌드 결과) 정적 서빙 — `npm run build`를 web/에서 먼저 실행해야 함
+app.use(express.static(WEB_DIST));
+
+// /login 같은 클라이언트 경로를 직접 열거나 새로고침해도 Svelte 앱을 반환한다.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(WEB_DIST, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`Zotero Insight 서버 실행 중: http://localhost:${PORT}`);
+  console.log(`Folio 서버 실행 중: http://localhost:${PORT}`);
 });

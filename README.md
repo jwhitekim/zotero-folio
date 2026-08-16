@@ -1,47 +1,76 @@
-# Zotero Insight
+# Folio
 
-Zotero 라이브러리는 그대로 두고, 그 위에 "AI 요약 + 의미 검색" 레이어만
+Folio는 Zotero 라이브러리는 그대로 두고, 그 위에 "직접 읽고 정리하는 공간"만
 얹는 개인용 도구입니다. 저장/메타데이터/PDF 동기화는 전부 Zotero가
-하던 대로 하고, 이 도구는 새 논문이 들어오면:
+하던 대로 하고, 이 도구는:
 
-1. PDF 텍스트를 추출해서
-2. Gemini로 3줄 요약 + 키워드 태그를 생성하고
-3. 그 요약을 Zotero 아이템의 노트로 다시 써넣고 (Zotero 앱에서 바로 보임)
-4. 임베딩을 로컬에 저장해서 "이 주제 관련 논문 찾아줘" 같은 의미 검색을 지원합니다
+1. 논문 목록을 북마크 매니저처럼 보여주고 (제목 검색 지원)
+2. 논문마다 자유롭게 메모를 쓸 수 있게 하고 (Zotero child note로 저장)
+3. 논문에 안 묶인 독립 메모도 쓸 수 있게 하고 (Zotero standalone note로 저장)
+4. Zotero 컬렉션 기준으로 논문을 탐색할 수 있게 합니다
+
+AI가 대신 요약해주지 않습니다 — 요약은 머리에 남지 않는다는 판단으로,
+이 도구는 순전히 "직접 쓰는 메모" 공간입니다.
 
 ## 왜 이렇게 만들었나
 
 - Zotero: 저장, 메타데이터 추출, PDF 관리, 다기기 동기화 — 이미 잘 되어 있는 부분
-- 이 도구: Zotero가 안 해주는 것만 보강 — "왜 저장했는지" 맥락, 의미 기반 검색
+- 이 도구: Zotero가 안 해주는 것만 보강 — 목록 탐색 + 직접 쓰는 메모
 - Zotero를 대체하지 않고 옆에서 보강하는 구조라, Zotero가 업데이트되거나
-  다른 기기에서 접속해도 안 깨집니다.
+  다른 기기에서 접속해도 안 깨집니다. 메모도 전부 Zotero note로 저장되므로
+  이 도구 없이도 Zotero 앱에서 그대로 보입니다.
 
 ## 준비물
 
-- Zotero API 키: https://www.zotero.org/settings/keys 에서 발급
-  (본인 라이브러리만 쓸 거라 OAuth 앱 등록 불필요, 개인 키로 충분)
-- Zotero User ID: 같은 페이지에서 확인 가능
-- Gemini API 키: https://aistudio.google.com/apikey 에서 발급
-- Voyage AI API 키: https://www.voyageai.com 에서 발급 (임베딩 기반 의미 검색에 사용)
+- Zotero OAuth 앱: https://www.zotero.org/oauth/apps 에서 등록 후
+  Client Key / Client Secret 발급 (콜백 URL은 로컬 실행 시
+  `http://localhost:3002/oauth/callback`)
 
 ## 설치 및 실행
 
 ```bash
 npm install
 cp .env.example .env
-# .env에 ZOTERO_API_KEY, ZOTERO_USER_ID, GEMINI_API_KEY, VOYAGE_API_KEY 입력
-npm start
+# .env에 ZOTERO_CLIENT_KEY, ZOTERO_CLIENT_SECRET 입력
+npm run build:web   # web/ 의존성 설치 + Svelte 앱 빌드 (최초 1회, 또는 web/ 수정 후)
+npm start           # http://localhost:3002 에서 API + 웹 UI 함께 서빙
 ```
+
+처음 접속하면 로그인 화면이 뜬다 — "Zotero로 로그인"을 누르면 Zotero
+사이트에서 인가한 뒤 자동으로 돌아온다. 이후로는 서버가 발급받은 토큰을
+`data/`에 저장해두고 재사용하므로 다시 로그인할 필요 없다.
+
+웹 UI를 수정하며 개발할 때는 `cd web && npm run dev`로 Vite 개발 서버(핫
+리로드)를 따로 띄우면 됩니다 — `/api` 요청은 자동으로 3002번 포트로
+프록시됩니다.
+
+### Docker로 실행
+
+```bash
+cp .env.example .env   # 키 채워넣기
+docker compose up --build
+```
+
+`web/` 빌드(Vite)와 서버 의존성 설치가 이미지 안에서 처리됩니다.
+SQLite 캐시는 `./data`에 볼륨으로 영속화됩니다.
+
+localhost가 아닌 주소로 접속한다면 `.env`의 `APP_BASE_URL`을 실제
+접속 주소로 설정하고, Zotero OAuth 앱의 콜백 URL도 `<그 주소>/oauth/callback`으로
+등록해야 로그인이 정상 동작합니다.
 
 ## 기능
 
-- `POST /api/sync` — Zotero 라이브러리에서 새 아이템 확인, 요약/태그 생성,
-  Zotero에 노트로 저장, 로컬에 임베딩 저장
-- `GET /api/search?q=검색어` — 저장된 논문 중 의미상 가까운 것 반환
-- `GET /api/papers` — 지금까지 처리한 논문 목록 (요약 포함)
+- **Papers 탭** — 캐시된 논문 목록, 제목 검색
+- **논문 상세** — 메타데이터(제목/저자/연도/PDF 링크) + 이 논문에만
+  귀속된 메모 (Zotero child note)
+- **나만의 메모 탭** — 논문에 안 묶인 독립 메모 (Zotero standalone note)
+- **컬렉션 탭** — Zotero 컬렉션 목록과 소속 논문 탐색
+- **검색 아이콘** — 어디서든 논문 제목 검색으로 바로 진입
+- `POST /api/sync` — Zotero에서 논문 메타데이터만 캐시 (AI 처리 없음)
 
 ## 다음에 추가하면 좋은 것
 
+- 의미 기반 검색 (임베딩) — 지금은 제목 검색만 지원, 나중에
+  `GET /api/search?q=`로 얹을 수 있게 구조는 열어둠
 - 주기적 자동 동기화 (cron)
-- 저장 시 자동 알림 (새 논문 요약 완료되면 알려주기)
-- 웹 UI (지금은 API만 있음)
+- 읽음/읽는 중/읽을 예정 같은 상태 관리
