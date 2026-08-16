@@ -13,6 +13,7 @@
   let container = $state();
   let loading = $state(true);
   let error = $state('');
+  let errorDetail = $state('');
   let resizeToken = $state(0);
   let pdfDocument;
   let loadedSrc = '';
@@ -85,7 +86,15 @@
         if (pageNum === 1 && version === renderVersion) loading = false;
       }
     } catch (err) {
-      if (version === renderVersion) error = err.message;
+      if (version === renderVersion) {
+        error = err.message;
+        errorDetail = [
+          `${err.name || 'Error'}: ${err.message}`,
+          err.stack || '(스택 정보 없음)',
+          navigator.userAgent,
+        ].join('\n');
+        console.error('[PdfViewer]', err);
+      }
     } finally {
       if (version === renderVersion) loading = false;
     }
@@ -113,6 +122,41 @@
 
 <div class="pdf-viewer" class:is-loading={loading}>
   {#if loading}<p class="pdf-status">PDF 페이지를 준비하는 중…</p>{/if}
-  {#if error}<p class="pdf-status error">PDF를 불러오지 못했어요: {error}</p>{/if}
+  {#if error}
+    <div class="pdf-status error">
+      <p>PDF를 불러오지 못했어요: {error}</p>
+      <details class="pdf-error-detail">
+        <summary>기술 정보 (스크린샷으로 공유해주세요)</summary>
+        <pre>{errorDetail}</pre>
+      </details>
+    </div>
+  {/if}
   <div class="pdf-pages" bind:this={container}></div>
 </div>
+
+<style>
+  .pdf-error-detail {
+    max-width: 420px;
+    margin: 0.75rem auto 0;
+    text-align: left;
+  }
+
+  .pdf-error-detail summary {
+    cursor: pointer;
+    font-size: 0.72rem;
+  }
+
+  .pdf-error-detail pre {
+    margin-top: 0.5rem;
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    color: var(--text-soft);
+    font-size: 0.68rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+  }
+</style>
