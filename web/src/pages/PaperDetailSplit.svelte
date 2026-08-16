@@ -12,6 +12,7 @@
   let error = $state('');
   let mobilePane = $state('pdf');
   let pdfZoom = $state(1);
+  let noteCollapsed = $state(false);
 
   let deleteState = $state('idle'); // 'idle' | 'confirm' | 'deleting'
   let deleteError = $state('');
@@ -76,7 +77,7 @@
       <button class:active={mobilePane === 'note'} onclick={() => (mobilePane = 'note')}><Icon name="note" size={17} /> 노트</button>
     </div>
 
-    <div class="split-view" data-mobile-pane={mobilePane}>
+    <div class="split-view" class:note-collapsed={noteCollapsed} data-mobile-pane={mobilePane}>
       <section class="split-pdf-pane" aria-label="PDF 원문">
         <div class="pdf-pane-toolbar">
           <div><span class="toolbar-icon"><Icon name="file" size={17} /></span><strong>PDF 원문</strong></div>
@@ -96,6 +97,14 @@
               새 창에서 열기 <Icon name="external" size={15} />
             </a>
           {/if}
+          <button
+            class="note-collapse-toggle"
+            onclick={() => (noteCollapsed = !noteCollapsed)}
+            aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
+            aria-pressed={noteCollapsed}
+          >
+            <Icon name="panel" size={16} />
+          </button>
         </div>
         <div class="pdf-scroll">
           {#if paper.hasPdf}

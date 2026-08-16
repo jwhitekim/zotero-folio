@@ -1411,6 +1411,15 @@ textarea::placeholder {
   height: calc(100dvh - 64px);
   overflow: hidden;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 480px);
+  transition: grid-template-columns 200ms ease;
+}
+
+.split-view.note-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.split-view.note-collapsed .split-note-pane {
+  display: none;
 }
 
 .split-pdf-pane,
@@ -1493,6 +1502,28 @@ textarea::placeholder {
   place-items: center;
   border-radius: 8px;
   background: var(--accent-pale);
+  color: var(--accent);
+}
+
+.note-collapse-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.note-collapse-toggle:hover {
+  background: var(--accent-pale);
+  color: var(--accent);
+}
+
+.note-collapse-toggle[aria-pressed='true'] {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -1764,6 +1795,10 @@ textarea::placeholder {
   .split-view {
     height: calc(100dvh - 106px);
     grid-template-columns: 1fr;
+  }
+
+  .note-collapse-toggle {
+    display: none;
   }
 
   .split-view[data-mobile-pane='pdf'] .split-note-pane,
