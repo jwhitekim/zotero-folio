@@ -61,13 +61,11 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST || secrets.SERVER_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER || secrets.SERVER_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH }}
         run: |
           set -euo pipefail
           : "${SSH_USER:?GitHub secret SSH_USER or SERVER_USER is not set}"
-          : "${DEPLOY_PATH:?GitHub secret or repo variable DEPLOY_PATH is not set (server path containing docker-compose.yml)}"
           ssh \
             -i ~/.ssh/folio_deploy \
             -p "$SSH_PORT" \
             "$SSH_USER@$SSH_HOST" \
-            "cd '$DEPLOY_PATH' && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps"
+            "cd /mnt/c/Users/admin/joonspace/zotero-insight && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps"
