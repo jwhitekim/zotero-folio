@@ -4,6 +4,10 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte()],
+  worker: {
+    // pdf.js가 워커를 { type: "module" }로 띄우므로 번들도 ES 모듈이어야 함
+    format: 'es',
+  },
   server: {
     // 개발 중에는 API 요청을 Express 서버(3002)로 프록시
     proxy: {
