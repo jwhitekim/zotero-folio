@@ -1,5 +1,5 @@
 <script>
-  import Icon from './Icon.svelte';
+  import Icon from '../components/Icon.svelte';
 
   let { error = '', onRetry, connected = false, username = '' } = $props();
 </script>

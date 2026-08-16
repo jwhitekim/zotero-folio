@@ -1,7 +1,7 @@
 <script>
-  import { api } from './api.js';
-  import StructuredNote from './StructuredNote.svelte';
-  import Icon from './Icon.svelte';
+  import { api } from '../services/api.js';
+  import StructuredNote from '../components/StructuredNote.svelte';
+  import Icon from '../components/Icon.svelte';
 
   let { itemKey, onBack, backLabel = '라이브러리' } = $props();
 

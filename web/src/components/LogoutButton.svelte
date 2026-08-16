@@ -1,6 +1,6 @@
 <script>
   import Icon from './Icon.svelte';
-  import { api } from './api.js';
+  import { api } from '../services/api.js';
 
   let { compact = false } = $props();
   let busy = $state(false);

@@ -1,7 +1,7 @@
 <script>
-  import { api } from './api.js';
-  import Icon from './Icon.svelte';
-  import LogoutButton from './LogoutButton.svelte';
+  import { api } from '../services/api.js';
+  import Icon from '../components/Icon.svelte';
+  import LogoutButton from '../components/LogoutButton.svelte';
 
   let { onOpenPaper, username = '' } = $props();
 
