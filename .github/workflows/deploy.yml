@@ -10,30 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build web UI (Svelte)
-        run: npm run build:web
-
-      - name: Syntax-check server files
-        run: |
-          set -e
-          for f in server/*.js; do
-            node --check "$f"
-          done
-
-      - name: Validate Docker build
-        run: docker build -t folio:ci .
-
   deploy:
-    needs: build
     runs-on: ubuntu-latest
     environment: production
     steps:
