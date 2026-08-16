@@ -1815,12 +1815,12 @@ textarea::placeholder {
   }
 
   .pdf-pane-toolbar > div:first-child strong,
-  .pdf-pane-toolbar > a {
+  .pdf-toolbar-actions > a {
     font-size: 0;
     gap: 0;
   }
 
-  .pdf-pane-toolbar > a svg {
+  .pdf-toolbar-actions > a svg {
     width: 17px;
     height: 17px;
   }
