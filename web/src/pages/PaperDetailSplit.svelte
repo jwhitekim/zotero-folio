@@ -70,7 +70,14 @@
     </button>
     <div class="reader-brand"><strong>Folio</strong><span></span><em>읽기</em></div>
     {#if paper}
-      <p class="reader-title">{paper.title}</p>
+      {#if paper.hasPdf}
+        <a class="reader-title" href={`/api/papers/${itemKey}/pdf`} target="_blank" rel="noopener" title="새 창에서 PDF 열기">
+          <span class="reader-title-text">{paper.title}</span>
+          <Icon name="external" size={13} />
+        </a>
+      {:else}
+        <p class="reader-title">{paper.title}</p>
+      {/if}
     {/if}
   </header>
 
@@ -88,32 +95,27 @@
       <section class="split-pdf-pane" aria-label="PDF 원문">
         <div class="pdf-pane-toolbar">
           <div><span class="toolbar-icon"><Icon name="file" size={17} /></span><strong>PDF 원문</strong></div>
-          <div class="pdf-toolbar-actions">
-            {#if paper.hasPdf}
-              <div class="pdf-zoom-controls" aria-label="PDF 확대 및 축소">
-                <button onclick={() => changeZoom(-0.15)} disabled={pdfZoom <= MIN_ZOOM} aria-label="PDF 축소">−</button>
-                <button class="zoom-value" onclick={() => (pdfZoom = 1)} aria-label="화면 너비에 맞추기">
-                  {Math.round(pdfZoom * 100)}%
-                </button>
-                <button onclick={() => changeZoom(0.15)} disabled={pdfZoom >= MAX_ZOOM} aria-label="PDF 확대">
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
-            {/if}
-            {#if paper.hasPdf}
-              <a href={`/api/papers/${itemKey}/pdf`} target="_blank" rel="noopener">
-                새 창에서 열기 <Icon name="external" size={15} />
-              </a>
-            {/if}
-            <button
-              class="note-collapse-toggle"
-              onclick={() => (noteCollapsed = !noteCollapsed)}
-              aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
-              aria-pressed={noteCollapsed}
-            >
-              <Icon name="panel" size={16} />
-            </button>
-          </div>
+          {#if paper.hasPdf}
+            <div class="pdf-zoom-controls" aria-label="PDF 확대 및 축소">
+              <button onclick={() => changeZoom(-0.15)} disabled={pdfZoom <= MIN_ZOOM} aria-label="PDF 축소">−</button>
+              <button class="zoom-value" onclick={() => (pdfZoom = 1)} aria-label="화면 너비에 맞추기">
+                {Math.round(pdfZoom * 100)}%
+              </button>
+              <button onclick={() => changeZoom(0.15)} disabled={pdfZoom >= MAX_ZOOM} aria-label="PDF 확대">
+                <Icon name="plus" size={14} />
+              </button>
+            </div>
+          {:else}
+            <span></span>
+          {/if}
+          <button
+            class="note-collapse-toggle"
+            onclick={() => (noteCollapsed = !noteCollapsed)}
+            aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
+            aria-pressed={noteCollapsed}
+          >
+            <Icon name="panel" size={16} />
+          </button>
         </div>
         <div class="pdf-scroll" onwheel={onPdfWheel}>
           {#if paper.hasPdf}
