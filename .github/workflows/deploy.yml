@@ -1,0 +1,73 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build web UI (Svelte)
+        run: npm run build:web
+
+      - name: Syntax-check server files
+        run: |
+          set -e
+          for f in server/*.js; do
+            node --check "$f"
+          done
+
+      - name: Validate Docker build
+        run: docker build -t folio:ci .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST || secrets.SERVER_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          : "${SSH_PRIVATE_KEY:?GitHub secret SSH_PRIVATE_KEY is not set}"
+          : "${SSH_HOST:?GitHub secret SSH_HOST or SERVER_HOST is not set}"
+          : "${SSH_PORT:?GitHub secret SSH_PORT is not set}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/folio_deploy
+          chmod 600 ~/.ssh/folio_deploy
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy (git pull + docker compose up -d --build)
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST || secrets.SERVER_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER || secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          : "${SSH_USER:?GitHub secret SSH_USER or SERVER_USER is not set}"
+          : "${DEPLOY_PATH:?GitHub secret or repo variable DEPLOY_PATH is not set (server path containing docker-compose.yml)}"
+          ssh \
+            -i ~/.ssh/folio_deploy \
+            -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps"
