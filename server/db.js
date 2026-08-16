@@ -1,7 +1,9 @@
 // SQLite 스키마 + 헬퍼 함수.
-// processed_items: 이미 요약을 생성한 아이템 캐시 (중복 요약 방지)
-// embeddings: 의미 검색용 벡터 저장
+// papers: 논문 목록/검색/컬렉션 필터용 메타데이터 캐시 (요약/메모 원문은 안 담음)
 // sync_state: 마지막으로 동기화한 Zotero 라이브러리 버전
+//
+// 메모 원문은 절대 여기 캐시하지 않는다 — Zotero가 항상 최신 기준이므로
+// 매 요청마다 Zotero API에서 라이브로 읽는다 (zotero.js 참고).
 
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -14,20 +16,15 @@ const db = new Database(path.join(DATA_DIR, 'zotero-insight.db'));
 db.pragma('journal_mode = WAL');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS processed_items (
-    item_key      TEXT PRIMARY KEY,
-    item_version  INTEGER NOT NULL,
-    title         TEXT,
-    summary       TEXT,
-    tags          TEXT,
-    note_key      TEXT,
-    processed_at  TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS embeddings (
-    item_key  TEXT PRIMARY KEY REFERENCES processed_items(item_key),
-    vector    BLOB NOT NULL,
-    dim       INTEGER NOT NULL
+  CREATE TABLE IF NOT EXISTS papers (
+    item_key       TEXT PRIMARY KEY,
+    item_version   INTEGER NOT NULL,
+    title          TEXT,
+    authors        TEXT,   -- JSON 배열 문자열
+    year           TEXT,
+    attachment_key TEXT,
+    collections    TEXT,   -- JSON 배열 문자열 (Zotero collection key 목록)
+    synced_at      TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS sync_state (
@@ -49,87 +46,95 @@ export function setLastVersion(version) {
   ).run('lastVersion', String(version));
 }
 
-// --- processed_items -----------------------------------------------------
+// --- Zotero OAuth 인증 (sync_state 재사용 — 1인용이라 별도 테이블 불필요) -----
 
-export function isItemProcessed(itemKey, itemVersion) {
-  const row = db
-    .prepare('SELECT item_version FROM processed_items WHERE item_key = ?')
-    .get(itemKey);
-  return !!row && row.item_version === itemVersion;
+const upsertSyncState = db.prepare(
+  'INSERT INTO sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+);
+
+export function getZoteroAuth() {
+  const rows = db
+    .prepare("SELECT key, value FROM sync_state WHERE key IN ('zoteroToken', 'zoteroUserId', 'zoteroUsername')")
+    .all();
+  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  if (!map.zoteroToken || !map.zoteroUserId) return null;
+  return { token: map.zoteroToken, userId: map.zoteroUserId, username: map.zoteroUsername || '' };
 }
 
-// item + vector를 한 트랜잭션으로 저장 (요약/노트/임베딩까지 전부 성공한
-// 아이템만 호출됨).
-const insertProcessedItem = db.prepare(`
-  INSERT INTO processed_items (item_key, item_version, title, summary, tags, note_key)
-  VALUES (@itemKey, @itemVersion, @title, @summary, @tags, @noteKey)
+export function setZoteroAuth({ token, userId, username }) {
+  upsertSyncState.run('zoteroToken', token);
+  upsertSyncState.run('zoteroUserId', userId);
+  upsertSyncState.run('zoteroUsername', username || '');
+}
+
+export function clearZoteroAuth() {
+  db.prepare("DELETE FROM sync_state WHERE key IN ('zoteroToken', 'zoteroUserId', 'zoteroUsername')").run();
+}
+
+// --- papers ------------------------------------------------------------
+
+const upsertPaper = db.prepare(`
+  INSERT INTO papers (item_key, item_version, title, authors, year, attachment_key, collections)
+  VALUES (@itemKey, @itemVersion, @title, @authors, @year, @attachmentKey, @collections)
   ON CONFLICT(item_key) DO UPDATE SET
     item_version = excluded.item_version,
     title = excluded.title,
-    summary = excluded.summary,
-    tags = excluded.tags,
-    note_key = excluded.note_key,
-    processed_at = datetime('now')
+    authors = excluded.authors,
+    year = excluded.year,
+    attachment_key = excluded.attachment_key,
+    collections = excluded.collections,
+    synced_at = datetime('now')
 `);
 
-const insertEmbedding = db.prepare(`
-  INSERT INTO embeddings (item_key, vector, dim)
-  VALUES (@itemKey, @vector, @dim)
-  ON CONFLICT(item_key) DO UPDATE SET vector = excluded.vector, dim = excluded.dim
-`);
-
-export const saveProcessedItem = db.transaction(
-  ({ itemKey, itemVersion, title, summary, tags, noteKey, vector }) => {
-    insertProcessedItem.run({
-      itemKey,
-      itemVersion,
-      title,
-      summary: JSON.stringify(summary),
-      tags: JSON.stringify(tags),
-      noteKey,
-    });
-    insertEmbedding.run({
-      itemKey,
-      vector: Buffer.from(Float32Array.from(vector).buffer),
-      dim: vector.length,
-    });
-  }
-);
-
-export function listProcessedItems() {
-  const rows = db
-    .prepare('SELECT * FROM processed_items ORDER BY processed_at DESC')
-    .all();
-  return rows.map((row) => ({
-    itemKey: row.item_key,
-    title: row.title,
-    summary: JSON.parse(row.summary),
-    tags: JSON.parse(row.tags),
-    noteKey: row.note_key,
-    processedAt: row.processed_at,
-  }));
+export function savePaper({ itemKey, itemVersion, title, authors, year, attachmentKey, collections }) {
+  upsertPaper.run({
+    itemKey,
+    itemVersion,
+    title,
+    authors: JSON.stringify(authors),
+    year,
+    attachmentKey,
+    collections: JSON.stringify(collections),
+  });
 }
 
-// --- embeddings ------------------------------------------------------------
-
-export function listEmbeddingsWithItems() {
-  const rows = db
-    .prepare(
-      `SELECT e.item_key, e.vector, e.dim, p.title, p.summary, p.tags
-       FROM embeddings e JOIN processed_items p ON p.item_key = e.item_key`
-    )
-    .all();
-  return rows.map((row) => ({
+function rowToPaper(row) {
+  return {
     itemKey: row.item_key,
-    vector: new Float32Array(
-      row.vector.buffer,
-      row.vector.byteOffset,
-      row.dim
-    ),
     title: row.title,
-    summary: JSON.parse(row.summary),
-    tags: JSON.parse(row.tags),
-  }));
+    authors: JSON.parse(row.authors),
+    year: row.year,
+    hasPdf: !!row.attachment_key,
+    attachmentKey: row.attachment_key,
+    collections: JSON.parse(row.collections),
+    syncedAt: row.synced_at,
+  };
+}
+
+export function listPapers(query) {
+  const rows = query
+    ? db
+        .prepare('SELECT * FROM papers WHERE title LIKE ? ORDER BY title COLLATE NOCASE')
+        .all(`%${query}%`)
+    : db.prepare('SELECT * FROM papers ORDER BY synced_at DESC').all();
+  return rows.map(rowToPaper);
+}
+
+export function getPaper(itemKey) {
+  const row = db.prepare('SELECT * FROM papers WHERE item_key = ?').get(itemKey);
+  return row ? rowToPaper(row) : null;
+}
+
+export function deletePaper(itemKey) {
+  db.prepare('DELETE FROM papers WHERE item_key = ?').run(itemKey);
+}
+
+export function listPapersByCollection(collectionKey) {
+  // collections 컬럼은 JSON 배열 문자열 — LIKE로 key 포함 여부를 간단히 필터링
+  const rows = db
+    .prepare("SELECT * FROM papers WHERE collections LIKE ? ORDER BY title COLLATE NOCASE")
+    .all(`%"${collectionKey}"%`);
+  return rows.map(rowToPaper);
 }
 
 export default db;

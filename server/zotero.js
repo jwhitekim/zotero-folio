@@ -1,21 +1,35 @@
 // Zotero Web API 클라이언트.
-// 읽기: 변경된 아이템 조회(버전 기반 증분), 자식 아이템/PDF 첨부파일 조회, PDF 다운로드
-// 쓰기: child note 생성만 지원한다 — 기존 아이템 필드를 수정하는 함수는
-//       의도적으로 만들지 않는다 (CLAUDE.md 제약).
+// 읽기: 변경된 아이템 조회(버전 기반 증분), 자식 아이템/컬렉션 조회, PDF 다운로드
+// 쓰기: note 생성/수정만 지원한다. 원본 아이템의 title/author/PDF 등 서지정보
+//       필드를 수정하는 함수는 의도적으로 만들지 않는다 (CLAUDE.md 제약).
+//       단, 이 도구가 직접 만든 메모 note(태그로 식별)는 생성/수정 둘 다 한다.
 
 import crypto from 'node:crypto';
+import { getZoteroAuth } from './db.js';
 
 const BASE_URL = 'https://api.zotero.org';
 
-function headers() {
+function requireAuth() {
+  const auth = getZoteroAuth();
+  if (!auth) throw new Error('Zotero 계정이 연결되지 않았습니다 — /oauth/login으로 로그인하세요');
+  return auth;
+}
+
+function headers(extra = {}) {
   return {
-    'Zotero-API-Key': process.env.ZOTERO_API_KEY,
+    'Zotero-API-Key': requireAuth().token,
     'Zotero-API-Version': '3',
+    ...extra,
   };
 }
 
+function writeToken() {
+  // Zotero-Write-Token은 5~32자만 허용 (UUID는 하이픈 포함 36자라 그대로 못 씀)
+  return crypto.randomUUID().replace(/-/g, '');
+}
+
 function userPrefix() {
-  return `${BASE_URL}/users/${process.env.ZOTERO_USER_ID}`;
+  return `${BASE_URL}/users/${requireAuth().userId}`;
 }
 
 // 마지막 동기화 버전 이후 바뀐 최상위 아이템을 전부 가져온다 (페이지네이션 처리).
@@ -45,15 +59,29 @@ export async function fetchChangedTopItems(sinceVersion) {
   return { items, newVersion };
 }
 
-// 아이템의 자식 중 PDF 첨부파일 하나를 찾는다. 없으면 null.
-export async function findPdfAttachment(itemKey) {
+// 단일 아이템 메타데이터 조회 (논문 상세 페이지용).
+export async function fetchItem(itemKey) {
+  const url = `${userPrefix()}/items/${itemKey}?format=json`;
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) {
+    throw new Error(`Zotero 아이템 조회 실패: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+// 아이템의 자식(첨부파일, note)을 전부 가져온다.
+export async function fetchChildren(itemKey) {
   const url = `${userPrefix()}/items/${itemKey}/children?format=json`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) {
     throw new Error(`Zotero children 조회 실패: ${res.status} ${res.statusText}`);
   }
+  return res.json();
+}
 
-  const children = await res.json();
+// 자식 중 PDF 첨부파일 하나를 찾는다. 없으면 null.
+export async function findPdfAttachment(itemKey) {
+  const children = await fetchChildren(itemKey);
   const attachment = children.find(
     (child) =>
       child.data.itemType === 'attachment' &&
@@ -62,7 +90,20 @@ export async function findPdfAttachment(itemKey) {
   return attachment ? attachment.data.key : null;
 }
 
-// PDF 첨부파일 바이너리를 다운로드한다.
+// 자식 note 중 특정 태그가 붙은 것 하나를 찾는다 (논문별 메모용). 없으면 null.
+// 반환값은 다른 note 함수들과 동일하게 전체 Zotero item envelope({key, version, data}).
+export async function findChildNoteByTag(itemKey, tag) {
+  const children = await fetchChildren(itemKey);
+  return (
+    children.find(
+      (child) =>
+        child.data.itemType === 'note' &&
+        child.data.tags?.some((t) => t.tag === tag)
+    ) ?? null
+  );
+}
+
+// PDF 첨부파일 바이너리를 다운로드한다 (브라우저로 그대로 스트리밍할 때 사용).
 export async function downloadAttachmentFile(attachmentKey) {
   const url = `${userPrefix()}/items/${attachmentKey}/file`;
   const res = await fetch(url, { headers: headers() });
@@ -73,7 +114,7 @@ export async function downloadAttachmentFile(attachmentKey) {
   return Buffer.from(arrayBuffer);
 }
 
-// 원본 아이템을 절대 건드리지 않고, 요약을 담은 child note만 새로 생성한다.
+// child note 생성 (parentItem에 귀속).
 export async function createChildNote(parentItemKey, noteHtml, tags) {
   const url = `${userPrefix()}/items`;
   const body = [
@@ -89,8 +130,7 @@ export async function createChildNote(parentItemKey, noteHtml, tags) {
     method: 'POST',
     headers: {
       ...headers(),
-      // Zotero-Write-Token은 5~32자만 허용 (UUID는 하이픈 포함 36자라 그대로 못 씀)
-      'Zotero-Write-Token': crypto.randomUUID().replace(/-/g, ''),
+      'Zotero-Write-Token': writeToken(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -105,5 +145,46 @@ export async function createChildNote(parentItemKey, noteHtml, tags) {
   if (!created) {
     throw new Error(`Zotero note 생성 실패: ${JSON.stringify(result.failed)}`);
   }
-  return created.data.key;
+  return created; // {key, version, data} — updateNote/fetchItem과 동일한 형태
+}
+
+// 이 도구가 만든 note를 수정한다 (부분 업데이트). 낙관적 잠금을 위해
+// version이 반드시 필요하다.
+export async function updateNote(noteKey, version, noteHtml) {
+  const url = `${userPrefix()}/items/${noteKey}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      ...headers({ 'If-Unmodified-Since-Version': String(version) }),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ note: noteHtml }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Zotero note 수정 실패: ${res.status} ${res.statusText}`);
+  }
+  return fetchItem(noteKey);
+}
+
+// note를 삭제한다 (아이템 자체는 Zotero 휴지통으로 이동, 원한다면 거기서 복구 가능).
+export async function deleteItem(itemKey, version) {
+  const url = `${userPrefix()}/items/${itemKey}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: headers({ 'If-Unmodified-Since-Version': String(version) }),
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`Zotero 아이템 삭제 실패: ${res.status} ${res.statusText}`);
+  }
+}
+
+// 라이브러리 컬렉션 목록.
+export async function listCollections() {
+  const url = `${userPrefix()}/collections?format=json&limit=100`;
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) {
+    throw new Error(`Zotero 컬렉션 조회 실패: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
 }
