@@ -68,4 +68,11 @@ jobs:
             -i ~/.ssh/folio_deploy \
             -p "$SSH_PORT" \
             "$SSH_USER@$SSH_HOST" \
-            "cd /mnt/c/Users/admin/joonspace/zotero-insight && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps"
+            'wsl.exe -- bash -s' <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd /mnt/c/Users/admin/joonspace/zotero-insight
+          git fetch origin main
+          git reset --hard origin/main
+          docker compose up -d --build
+          docker compose ps
+          REMOTE_SCRIPT
