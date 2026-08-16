@@ -49,6 +49,9 @@
     <path d="m6 6 12 12M18 6 6 18" />
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
+  {:else if name === 'panel'}
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <path d="M14.5 4.5v15" />
   {:else if name === 'trash'}
     <path d="M4 6.5h16M9 6.5V4.8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.7M6.5 6.5 7.3 19a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12.5" />
     <path d="M10.3 10.5v6.3M13.7 10.5v6.3" />
