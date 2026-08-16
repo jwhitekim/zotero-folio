@@ -1,9 +1,9 @@
 <script>
   // 모든 논문 상세에서 사용하는 PDF 원문 + 구조화 노트 읽기 화면.
-  import { api } from './api.js';
-  import PdfViewer from './PdfViewer.svelte';
-  import StructuredNote from './StructuredNote.svelte';
-  import Icon from './Icon.svelte';
+  import { api } from '../services/api.js';
+  import PdfViewer from '../components/PdfViewer.svelte';
+  import StructuredNote from '../components/StructuredNote.svelte';
+  import Icon from '../components/Icon.svelte';
 
   let { itemKey, onBack, backLabel = '라이브러리' } = $props();
 

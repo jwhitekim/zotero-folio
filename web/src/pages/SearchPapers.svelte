@@ -1,6 +1,6 @@
 <script>
-  import { api } from './api.js';
-  import Icon from './Icon.svelte';
+  import { api } from '../services/api.js';
+  import Icon from '../components/Icon.svelte';
 
   let {
     onOpenPaper,

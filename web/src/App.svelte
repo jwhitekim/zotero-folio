@@ -1,13 +1,13 @@
 <script>
   import { onMount } from 'svelte';
-  import TabBar from './lib/TabBar.svelte';
-  import HomeDashboard from './lib/HomeDashboard.svelte';
-  import PapersList from './lib/PapersList.svelte';
-  import SearchPapers from './lib/SearchPapers.svelte';
-  import PaperDetailSplit from './lib/PaperDetailSplit.svelte';
-  import Collections from './lib/Collections.svelte';
-  import LoginPage from './lib/LoginPage.svelte';
-  import { api } from './lib/api.js';
+  import TabBar from './components/TabBar.svelte';
+  import HomeDashboard from './pages/HomeDashboard.svelte';
+  import PapersList from './pages/PapersList.svelte';
+  import SearchPapers from './pages/SearchPapers.svelte';
+  import PaperDetailSplit from './pages/PaperDetailSplit.svelte';
+  import Collections from './pages/Collections.svelte';
+  import LoginPage from './pages/LoginPage.svelte';
+  import { api } from './services/api.js';
 
   let tab = $state('home'); // 'home' | 'papers' | 'collections' | 'search'
   let detailKey = $state(null); // 논문 상세로 들어가면 itemKey, 아니면 null

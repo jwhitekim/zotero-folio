@@ -2,9 +2,9 @@
   // PDF.js 캔버스 위에 텍스트 레이어를 겹쳐 원문의 선명도는 유지하면서
   // 텍스트 선택과 복사가 가능하도록 렌더링한다.
   import { onMount } from 'svelte';
-  import './safari-polyfills.js';
+  import '../utils/safari-polyfills.js';
   import * as pdfjsLib from 'pdfjs-dist';
-  import pdfWorkerUrl from './pdf-worker-entry.js?worker&url';
+  import pdfWorkerUrl from '../utils/pdf-worker-entry.js?worker&url';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
