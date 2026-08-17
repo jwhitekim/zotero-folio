@@ -22,6 +22,7 @@ import {
 } from './db.js';
 import {
   fetchChangedTopItems,
+  fetchDeletedItemKeys,
   fetchItem,
   findPdfAttachment,
   findChildNoteByTag,
@@ -145,8 +146,20 @@ async function doSync() {
     }
   }
 
+  // Zotero에서 삭제된 아이템은 로컬 캐시에도 유령으로 남지 않도록 함께 지운다.
+  let removed = 0;
+  try {
+    const deletedKeys = await fetchDeletedItemKeys(lastVersion);
+    for (const key of deletedKeys) {
+      deletePaper(key);
+      removed++;
+    }
+  } catch (err) {
+    console.error(`[sync] 삭제 항목 조회 실패: ${err.message}`);
+  }
+
   setLastVersion(newVersion);
-  return { checked: items.length, cached };
+  return { checked: items.length, cached, removed };
 }
 
 // --- Zotero OAuth 로그인 --------------------------------------------------

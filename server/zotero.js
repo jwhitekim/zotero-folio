@@ -59,6 +59,19 @@ export async function fetchChangedTopItems(sinceVersion) {
   return { items, newVersion };
 }
 
+// 마지막 동기화 버전 이후 Zotero에서 삭제된 최상위 아이템의 key 목록을 가져온다.
+// /items/top?since=만으로는 삭제가 감지되지 않아(삭제된 아이템은 그냥 응답에서
+// 빠짐), 로컬 캐시에 유령 아이템이 남는 것을 막으려면 별도로 확인해야 한다.
+export async function fetchDeletedItemKeys(sinceVersion) {
+  const url = `${userPrefix()}/deleted?since=${sinceVersion}`;
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) {
+    throw new Error(`Zotero deleted 조회 실패: ${res.status} ${res.statusText}`);
+  }
+  const data = await res.json();
+  return data.items || [];
+}
+
 // 단일 아이템 메타데이터 조회 (논문 상세 페이지용).
 export async function fetchItem(itemKey) {
   const url = `${userPrefix()}/items/${itemKey}?format=json`;
