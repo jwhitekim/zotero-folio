@@ -890,7 +890,7 @@ button:disabled {
 }
 
 .search-field-large .search-input {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
 }
 
 .clear-search {
@@ -1021,7 +1021,8 @@ button:disabled {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 0.9rem;
+  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
+  font-size: 1rem;
 }
 
 .search-input::placeholder,
@@ -1948,7 +1949,8 @@ a.reader-title svg {
   outline: 0;
   background: var(--surface-subtle);
   color: var(--text);
-  font-size: 0.85rem;
+  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
+  font-size: 1rem;
   font-weight: 700;
   transition: border-color 160ms ease, background 160ms ease;
 }
@@ -2009,7 +2011,8 @@ a.reader-title svg {
   outline: 0;
   background: var(--surface-subtle);
   color: var(--text);
-  font-size: 0.84rem;
+  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
+  font-size: 1rem;
   line-height: 1.75;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
