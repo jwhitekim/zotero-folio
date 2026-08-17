@@ -28,12 +28,91 @@
   // debounce로 미뤄지지만, 그 사이엔 이 값 대비 zoom 비율만큼 CSS로 즉시
   // 확대 미리보기를 보여준다 — 스크롤 중에도 계속 커지는 느낌을 위해서다.
   let renderedZoom = $state(1);
+  // 참고문헌 링크로 점프하기 직전의 스크롤 위치. null이면 "돌아가기" 버튼을
+  // 숨긴다. 브라우저 뒤로가기(단축키는 OS/브라우저마다 달라 안 믿을 수
+  // 있음)에 기대지 않고도 확실하게 원위치로 돌아갈 수 있게 화면에 버튼을
+  // 둔다.
+  let jumpBackTop = $state(null);
 
   async function getDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
     pdfDocument = await pdfjsLib.getDocument({ url }).promise;
     loadedSrc = url;
     return pdfDocument;
+  }
+
+  // 목적지 배열(예: [ref, {name:'XYZ'}, left, top, zoom])에서 페이지 안에서의
+  // 정확한 y좌표(PDF 좌표계)를 뽑아낸다. 흔한 두 형태(XYZ, FitH류)만 처리하고
+  // 나머지(Fit 전체 등 y가 의미 없는 경우)는 null — 그럴 땐 페이지 맨 위로만 이동.
+  function destTopY(typeName, args) {
+    if (typeName === 'XYZ' && typeof args[1] === 'number') return args[1];
+    if ((typeName === 'FitH' || typeName === 'FitBH') && typeof args[0] === 'number') return args[0];
+    return null;
+  }
+
+  // 본문의 참고문헌 번호([39] 등)나 각주 클릭 시 이동(GoTo)하는 내부 링크,
+  // 그리고 외부 URL 링크를 처리하는 최소 링크 서비스. pdf.js의
+  // AnnotationLayer가 요구하는 인터페이스 중 실제로 쓰는 부분만 구현한다 —
+  // 우리는 pdf.js의 PDFViewer(전체 뷰어 프레임워크)를 쓰지 않고 페이지를
+  // 직접 그리므로, 그 프레임워크가 제공하는 PDFLinkService를 그대로 쓸 수
+  // 없다.
+  const linkService = {
+    externalLinkEnabled: true,
+    getDestinationHash: () => '#',
+    getAnchorUrl: () => '#',
+    addLinkAttributes(link, url) {
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    },
+    async goToDestination(dest) {
+      if (!pdfDocument || !container) return;
+      const explicitDest = typeof dest === 'string' ? await pdfDocument.getDestination(dest) : await dest;
+      if (!Array.isArray(explicitDest)) return;
+
+      const [destRef, destType, ...destArgs] = explicitDest;
+      let pageIndex;
+      if (destRef && typeof destRef === 'object') {
+        pageIndex = await pdfDocument.getPageIndex(destRef);
+      } else if (Number.isInteger(destRef)) {
+        pageIndex = destRef;
+      } else {
+        return;
+      }
+
+      const pageWrap = container.querySelector(`[data-page-number="${pageIndex + 1}"]`);
+      const scrollEl = container.closest('.pdf-scroll');
+      if (!pageWrap || !scrollEl) return;
+
+      // 페이지 맨 위가 아니라, 목적지가 그 페이지 안의 어디쯤인지까지
+      // 정확히 계산한다(참고문헌 목록처럼 한 페이지에 여러 항목이 있을 때
+      // 필요한 항목이 화면 밖에 남는 걸 막기 위해).
+      const topY = destTopY(destType?.name, destArgs);
+      let offsetInPage = 0;
+      if (topY != null) {
+        const page = await pdfDocument.getPage(pageIndex + 1);
+        const scale = pageWrap.offsetWidth / page.getViewport({ scale: 1 }).width;
+        const [, y] = page.getViewport({ scale }).convertToViewportPoint(0, topY);
+        offsetInPage = Math.max(0, y - 24);
+      }
+
+      const pageRect = pageWrap.getBoundingClientRect();
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const targetTop = scrollEl.scrollTop + (pageRect.top - scrollRect.top) + offsetInPage;
+
+      // 브라우저 뒤로가기로도 점프 전 위치로 돌아올 수 있도록 history에
+      // 남겨두고(URL은 안 바꿈), 화면에도 "돌아가기" 버튼을 띄운다.
+      history.pushState({ pdfScrollTop: scrollEl.scrollTop }, '', location.href);
+      jumpBackTop = scrollEl.scrollTop;
+
+      scrollEl.scrollTo({ top: targetTop, behavior: 'auto' });
+    },
+  };
+
+  function jumpBack() {
+    if (jumpBackTop == null) return;
+    container?.closest('.pdf-scroll')?.scrollTo({ top: jumpBackTop, behavior: 'auto' });
+    jumpBackTop = null;
   }
 
   async function paintPage(entry, outputScale) {
@@ -51,6 +130,10 @@
     textLayerElement.className = 'textLayer';
     pageWrap.appendChild(textLayerElement);
 
+    const annotationLayerElement = document.createElement('div');
+    annotationLayerElement.className = 'annotationLayer';
+    pageWrap.appendChild(annotationLayerElement);
+
     await page.render({
       canvasContext: canvas.getContext('2d'),
       viewport,
@@ -64,6 +147,15 @@
       viewport,
     });
     await textLayer.render();
+
+    const annotations = await page.getAnnotations({ intent: 'display' });
+    const annotationLayer = new pdfjsLib.AnnotationLayer({
+      div: annotationLayerElement,
+      page,
+      viewport: viewport.clone({ dontFlip: true }),
+      linkService,
+    });
+    await annotationLayer.render({ annotations });
   }
 
   async function render(url, zoomLevel) {
@@ -95,6 +187,7 @@
 
         const pageWrap = document.createElement('div');
         pageWrap.className = 'pdf-page-wrap';
+        pageWrap.dataset.pageNumber = String(pageNum);
         pageWrap.style.width = `${viewport.width}px`;
         pageWrap.style.height = `${viewport.height}px`;
         pageWrap.style.setProperty('--total-scale-factor', String(viewport.scale));
@@ -109,6 +202,10 @@
         // 페이지는 그린 순서대로 바로바로 공개한다 — 긴 논문일수록 첫 페이지를
         // 빨리 보여주는 게 중요하다.
         renderedZoom = zoomLevel;
+        // Svelte의 style:transform 반응형 갱신은 비동기라, 바로 아래
+        // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
+        // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
+        container.style.transform = 'scale(1)';
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
 
@@ -131,6 +228,10 @@
           if (version !== renderVersion) return;
         }
         renderedZoom = zoomLevel;
+        // Svelte의 style:transform 반응형 갱신은 비동기라, 바로 아래
+        // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
+        // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
+        container.style.transform = 'scale(1)';
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
       }
@@ -181,11 +282,33 @@
       clearTimeout(timer);
       timer = setTimeout(() => (resizeToken += 1), 180);
     };
+    // 참고문헌 링크로 점프하기 전 위치를 history state에 남겨두므로
+    // (linkService.goToDestination 참고), 뒤로가기 시 그 위치로 돌아간다.
+    const onPopState = (e) => {
+      if (typeof e.state?.pdfScrollTop !== 'number') return;
+      container?.closest('.pdf-scroll')?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
+      jumpBackTop = null;
+    };
+    // Option(Alt)+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌
+    // 점프 전 위치로 돌아가는 전용 단축키. 입력창/메모 에디터에 포커스가
+    // 있을 때는 가로채지 않는다(타이핑을 방해하면 안 되므로).
+    const onKeyDown = (e) => {
+      if (e.key !== 'ArrowLeft' || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+      if (jumpBackTop == null) return;
+      e.preventDefault();
+      jumpBack();
+    };
     window.addEventListener('resize', onResize);
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('keydown', onKeyDown);
     return () => {
       clearTimeout(timer);
       clearTimeout(zoomTimer);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
       renderVersion += 1;
     };
   });
@@ -202,6 +325,11 @@
       </details>
     </div>
   {/if}
+  {#if jumpBackTop !== null}
+    <button type="button" class="pdf-jump-back" onclick={jumpBack} title="Option+← 로도 돌아갈 수 있어요">
+      ← 돌아가기
+    </button>
+  {/if}
   <div class="pdf-pages" bind:this={container} style:transform={`scale(${zoom / renderedZoom})`}></div>
 </div>
 
@@ -212,6 +340,28 @@
        걸린 상태에서 기준점이 바뀌어 화면이 튀므로, 항상 상단 중앙으로
        고정해둔다. */
     transform-origin: 50% 0;
+  }
+
+  .pdf-jump-back {
+    position: sticky;
+    top: 12px;
+    z-index: 20;
+    width: fit-content;
+    margin: 0 12px 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.8rem;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  }
+
+  .pdf-jump-back:hover {
+    background: var(--surface-subtle);
   }
 
   .pdf-error-detail {
