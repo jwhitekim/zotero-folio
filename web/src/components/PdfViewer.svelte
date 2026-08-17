@@ -38,6 +38,10 @@
       const pdf = await getDocument(url);
       if (version !== renderVersion) return;
 
+      // 재렌더링 동안 컨테이너가 통째로 비면 스크롤 영역이 사라져 브라우저가
+      // scrollTop을 0으로 되돌린다(→ 1페이지 상단으로 튕김). 새 배율 기준
+      // 예상 높이를 placeholder로 미리 잡아 스크롤 위치를 그대로 유지한다.
+      container.style.minHeight = `${Math.ceil(container.offsetHeight * (zoomLevel / renderedZoom))}px`;
       renderedZoom = zoomLevel;
       container.replaceChildren();
       const availableWidth = Math.min(container.clientWidth, 900);
@@ -100,7 +104,12 @@
         console.error('[PdfViewer]', err);
       }
     } finally {
-      if (version === renderVersion) loading = false;
+      if (version === renderVersion) {
+        loading = false;
+        // 렌더링이 끝나면 placeholder 높이를 해제한다 (취소된 렌더링이면
+        // 더 새 렌더링이 자기 placeholder를 관리 중이므로 건드리지 않음).
+        container.style.minHeight = '';
+      }
     }
   }
 
@@ -134,19 +143,7 @@
     prevZoom = z;
 
     clearTimeout(zoomRenderTimer);
-    zoomRenderTimer = setTimeout(() => {
-      // render()는 캔버스를 전부 지웠다가 다시 채우는데, 그 찰나 컨테이너가
-      // 비어 스크롤 가능 영역이 사라지면서 브라우저가 scrollTop을 0으로
-      // 강제로 되돌려버린다. 실제 렌더링이 끝난 뒤 위에서 맞춰둔 스크롤
-      // 위치를 다시 복원한다 (더 최근 렌더링이 이미 시작됐다면 건너뜀).
-      const targetScrollTop = scrollEl ? scrollEl.scrollTop : null;
-      const expectedVersion = renderVersion + 1;
-      render(src, z).then(() => {
-        if (scrollEl && targetScrollTop !== null && renderVersion === expectedVersion) {
-          scrollEl.scrollTop = targetScrollTop;
-        }
-      });
-    }, 150);
+    zoomRenderTimer = setTimeout(() => render(src, z), 150);
   });
 
   onMount(() => {
