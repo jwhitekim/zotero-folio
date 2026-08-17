@@ -21,18 +21,15 @@
   const MIN_ZOOM = 0.7;
   const MAX_ZOOM = 2;
 
-  // 확대/축소 전에 "화면의 어느 지점이 어떤 콘텐츠를 가리키고 있었는지"를
-  // 기록해뒀다가, 새 배율의 레이아웃이 잡히자마자 그 지점이 그대로 유지되도록
-  // 스크롤 위치를 되돌린다. clientX/Y가 없으면(버튼 클릭 등) 화면 중앙을 기준으로 삼는다.
+  // 가로는 항상 중앙 정렬 — PDF 문서는 커서를 따라 옆으로 쏠리면 안 된다
+  // (PdfViewer의 transform-origin이 "50% 0"으로 고정되어 있어 확대해도
+  // 가로 방향은 항상 대칭으로 커진다. 아래 onPdfLayoutReady에서 재확정만 함).
   //
-  // 트랙패드/휠로 연속 스크롤하면 렌더링(비동기)이 따라잡기 전에 zoomTo가 여러 번
-  // 이어서 호출된다. 이때 매번 pdfScrollEl.scrollTop을 다시 읽으면, 아직 이전 배율
-  // 기준으로 남아있는 값을 기준점으로 써버려서 커서 위치가 계속 어긋난다. 그래서
-  // 아직 반영되지 않은 스크롤 목표(nextScrollLeft/Top)가 있으면 DOM 대신 그 값을
-  // 이어받아 계산한다 — 실제로 그려질 최종 배율 기준으로 매번 정확히 연쇄 계산된다.
-  let pendingZoomAnchor = null;
-
-  function zoomTo(nextZoom, clientX, clientY) {
+  // 세로는 "커서(또는 화면 중앙)가 가리키던 지점"이 화면상 같은 위치에 남도록
+  // 스크롤을 매번 그 자리에서 즉시 보정한다. CSS 확대 미리보기(transform:
+  // scale)와 스크롤 보정이 같은 틱에서 함께 적용되므로 서로 어긋나거나
+  // 애니메이션끼리 경쟁할 여지가 없다 — origin은 절대 움직이지 않는다.
+  function zoomTo(nextZoom, clientY) {
     const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(nextZoom * 100) / 100));
     if (clamped === pdfZoom || !pdfScrollEl) {
       pdfZoom = clamped;
@@ -40,16 +37,10 @@
     }
 
     const rect = pdfScrollEl.getBoundingClientRect();
-    const offsetX = (clientX ?? rect.left + rect.width / 2) - rect.left;
     const offsetY = (clientY ?? rect.top + rect.height / 2) - rect.top;
-    const baseLeft = pendingZoomAnchor ? pendingZoomAnchor.nextScrollLeft : pdfScrollEl.scrollLeft;
-    const baseTop = pendingZoomAnchor ? pendingZoomAnchor.nextScrollTop : pdfScrollEl.scrollTop;
     const ratio = clamped / pdfZoom;
 
-    pendingZoomAnchor = {
-      nextScrollLeft: (baseLeft + offsetX) * ratio - offsetX,
-      nextScrollTop: (baseTop + offsetY) * ratio - offsetY,
-    };
+    pdfScrollEl.scrollTop = (pdfScrollEl.scrollTop + offsetY) * ratio - offsetY;
     pdfZoom = clamped;
   }
 
@@ -57,29 +48,19 @@
     zoomTo(pdfZoom + delta);
   }
 
-  // PdfViewer가 새 배율로 페이지 레이아웃(크기)만 확정한 시점에 호출된다.
-  // 아직 캔버스는 그려지는 중이어도 스크롤 위치는 정확히 맞출 수 있다.
-  // scrollTo(smooth)로 부드럽게 이동시킨다 — 연속으로 휠 줌이 들어오면 진행 중인
-  // 애니메이션의 목표 지점만 다음 값으로 계속 갱신되어(브라우저 기본 동작)
-  // 자연스럽게 이어진다. 다만 위치가 순간이동해야 이해가 되는 상황(모션에 민감한
-  // 사용자, prefers-reduced-motion)에는 즉시 이동시킨다.
+  // PdfViewer가 새 배율로 실제 페이지 크기를 확정한 시점에 호출된다. 세로는
+  // zoomTo에서 이미 실시간으로 보정해뒀으니 건드리지 않고, 가로만 실제
+  // 콘텐츠 너비 기준으로 다시 정확히 가운데를 맞춘다.
   function onPdfLayoutReady() {
-    if (!pendingZoomAnchor || !pdfScrollEl) return;
-    const { nextScrollLeft, nextScrollTop } = pendingZoomAnchor;
-    pendingZoomAnchor = null;
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    pdfScrollEl.scrollTo({
-      left: nextScrollLeft,
-      top: nextScrollTop,
-      behavior: reduceMotion ? 'auto' : 'smooth',
-    });
+    if (!pdfScrollEl) return;
+    pdfScrollEl.scrollLeft = (pdfScrollEl.scrollWidth - pdfScrollEl.clientWidth) / 2;
   }
 
   // Ctrl/Cmd + 스크롤(트랙패드 핀치도 대부분 브라우저에서 이걸로 들어옴)로 확대/축소.
   function onPdfWheel(e) {
     if (!paper?.hasPdf || !(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
-    zoomTo(pdfZoom + (e.deltaY < 0 ? 0.08 : -0.08), e.clientX, e.clientY);
+    zoomTo(pdfZoom + (e.deltaY < 0 ? 0.08 : -0.08), e.clientY);
   }
 
   async function load() {
@@ -170,7 +151,11 @@
         </div>
         <div class="pdf-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
           {#if paper.hasPdf}
-            <PdfViewer src={`/api/papers/${itemKey}/pdf`} zoom={pdfZoom} onLayoutReady={onPdfLayoutReady} />
+            <PdfViewer
+              src={`/api/papers/${itemKey}/pdf`}
+              zoom={pdfZoom}
+              onLayoutReady={onPdfLayoutReady}
+            />
           {:else}
             <div class="pdf-empty"><Icon name="file" size={25} /><p>첨부된 PDF가 없어요.</p></div>
           {/if}
