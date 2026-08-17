@@ -24,6 +24,10 @@
   // 다시 그려지는 번쩍임을 없애기 위해서다.
   let shownSrc = null;
   let zoomTimer;
+  // 실제로 화면에 그려진(선명한) 캔버스가 어떤 배율 기준인지. 재렌더링은
+  // debounce로 미뤄지지만, 그 사이엔 이 값 대비 zoom 비율만큼 CSS로 즉시
+  // 확대 미리보기를 보여준다 — 스크롤 중에도 계속 커지는 느낌을 위해서다.
+  let renderedZoom = $state(1);
 
   async function getDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
@@ -104,6 +108,7 @@
         // 최초 로딩: 배치를 먼저 확정해 커서 앵커/전체 높이를 잡아 화면에 붙이고,
         // 페이지는 그린 순서대로 바로바로 공개한다 — 긴 논문일수록 첫 페이지를
         // 빨리 보여주는 게 중요하다.
+        renderedZoom = zoomLevel;
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
 
@@ -125,6 +130,7 @@
           await paintPage(entry, outputScale);
           if (version !== renderVersion) return;
         }
+        renderedZoom = zoomLevel;
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
       }
@@ -196,10 +202,18 @@
       </details>
     </div>
   {/if}
-  <div class="pdf-pages" bind:this={container}></div>
+  <div class="pdf-pages" bind:this={container} style:transform={`scale(${zoom / renderedZoom})`}></div>
 </div>
 
 <style>
+  .pdf-pages {
+    /* 가로/세로 앵커링은 전부 부모(PaperDetailSplit)가 scrollTop/Left를
+       직접 보정하는 방식으로 처리한다. origin이 여기서 움직이면 스케일이
+       걸린 상태에서 기준점이 바뀌어 화면이 튀므로, 항상 상단 중앙으로
+       고정해둔다. */
+    transform-origin: 50% 0;
+  }
+
   .pdf-error-detail {
     max-width: 420px;
     margin: 0.75rem auto 0;
