@@ -325,11 +325,6 @@
       </details>
     </div>
   {/if}
-  {#if jumpBackTop !== null}
-    <button type="button" class="pdf-jump-back" onclick={jumpBack} title="Option+← 로도 돌아갈 수 있어요">
-      ← 돌아가기
-    </button>
-  {/if}
   <div class="pdf-pages" bind:this={container} style:transform={`scale(${zoom / renderedZoom})`}></div>
 </div>
 
@@ -340,28 +335,6 @@
        걸린 상태에서 기준점이 바뀌어 화면이 튀므로, 항상 상단 중앙으로
        고정해둔다. */
     transform-origin: 50% 0;
-  }
-
-  .pdf-jump-back {
-    position: sticky;
-    top: 12px;
-    z-index: 20;
-    width: fit-content;
-    margin: 0 12px 0 auto;
-    display: flex;
-    align-items: center;
-    padding: 0.4rem 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: 0.8rem;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-  }
-
-  .pdf-jump-back:hover {
-    background: var(--surface-subtle);
   }
 
   .pdf-error-detail {
