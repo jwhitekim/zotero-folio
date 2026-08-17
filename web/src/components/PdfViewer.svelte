@@ -8,7 +8,7 @@
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-  let { src, zoom = 1 } = $props();
+  let { src, zoom = 1, onLayoutReady } = $props();
 
   let container = $state();
   let loading = $state(true);
@@ -39,6 +39,10 @@
       const availableWidth = Math.min(container.clientWidth, 900);
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
 
+      // 1단계: 모든 페이지의 크기를 먼저 계산해 빈 wrap을 배치한다.
+      // 확대/축소 시 커서 위치를 기준으로 스크롤을 복원하려면, 실제 픽셀을
+      // 그리기 전에 전체 레이아웃 높이가 먼저 확정되어 있어야 한다.
+      const pages = [];
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         if (version !== renderVersion) return;
 
@@ -52,6 +56,17 @@
         pageWrap.style.width = `${viewport.width}px`;
         pageWrap.style.height = `${viewport.height}px`;
         pageWrap.style.setProperty('--total-scale-factor', String(viewport.scale));
+        container.appendChild(pageWrap);
+
+        pages.push({ pageNum, page, viewport, pageWrap });
+      }
+
+      if (version !== renderVersion) return;
+      onLayoutReady?.();
+
+      // 2단계: 배치가 끝난 wrap에 캔버스와 텍스트 레이어를 순차적으로 그린다.
+      for (const { pageNum, page, viewport, pageWrap } of pages) {
+        if (version !== renderVersion) return;
 
         const canvas = document.createElement('canvas');
         canvas.className = 'pdf-page';
@@ -64,7 +79,6 @@
         const textLayerElement = document.createElement('div');
         textLayerElement.className = 'textLayer';
         pageWrap.appendChild(textLayerElement);
-        container.appendChild(pageWrap);
 
         await page.render({
           canvasContext: canvas.getContext('2d'),
