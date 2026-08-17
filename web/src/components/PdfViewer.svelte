@@ -1,7 +1,7 @@
 <script>
   // PDF.js 캔버스 위에 텍스트 레이어를 겹쳐 원문의 선명도는 유지하면서
   // 텍스트 선택과 복사가 가능하도록 렌더링한다.
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import '../utils/safari-polyfills.js';
   import * as pdfjsLib from 'pdfjs-dist';
   import pdfWorkerUrl from '../utils/pdf-worker-entry.js?worker&url';
@@ -15,9 +15,12 @@
   let error = $state('');
   let errorDetail = $state('');
   let resizeToken = $state(0);
+  let renderedZoom = $state(1);
   let pdfDocument;
   let loadedSrc = '';
   let renderVersion = 0;
+  let zoomRenderTimer;
+  let prevZoom = untrack(() => zoom);
 
   async function getDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
@@ -35,6 +38,7 @@
       const pdf = await getDocument(url);
       if (version !== renderVersion) return;
 
+      renderedZoom = zoomLevel;
       container.replaceChildren();
       const availableWidth = Math.min(container.clientWidth, 900);
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
@@ -100,9 +104,49 @@
     }
   }
 
+  // src/리사이즈 변경 시엔 즉시 재렌더링. zoom은 여기서 추적하지 않음 —
+  // 스크롤 중 매 wheel 이벤트마다 이 effect가 다시 도는 걸 막기 위함.
   $effect(() => {
     resizeToken;
-    if (container) render(src, zoom);
+    const s = src;
+    if (container) render(s, untrack(() => zoom));
+  });
+
+  // zoom 변경은 CSS 확대(아래 template)로 즉시 반영되고, 실제 캔버스
+  // 재렌더링은 스크롤이 멈춘 뒤 한 번만 하도록 debounce한다.
+  $effect(() => {
+    const z = zoom;
+    if (!container) {
+      prevZoom = z;
+      return;
+    }
+
+    // CSS transform은 컨테이너 맨 위(1페이지 상단)를 기준으로 확대되므로,
+    // 보정 없이 그대로 두면 스크롤을 깊이 내린 상태에서 확대할 때 화면이
+    // 1페이지 상단 쪽으로 튀어 보인다. 뷰포트 중심이 문서상 같은 위치를
+    // 계속 가리키도록 스크롤 위치를 함께 보정한다.
+    const scrollEl = container.closest('.pdf-scroll');
+    if (scrollEl && z !== prevZoom) {
+      const ratio = z / prevZoom;
+      const centerY = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+      scrollEl.scrollTop = centerY * ratio - scrollEl.clientHeight / 2;
+    }
+    prevZoom = z;
+
+    clearTimeout(zoomRenderTimer);
+    zoomRenderTimer = setTimeout(() => {
+      // render()는 캔버스를 전부 지웠다가 다시 채우는데, 그 찰나 컨테이너가
+      // 비어 스크롤 가능 영역이 사라지면서 브라우저가 scrollTop을 0으로
+      // 강제로 되돌려버린다. 실제 렌더링이 끝난 뒤 위에서 맞춰둔 스크롤
+      // 위치를 다시 복원한다 (더 최근 렌더링이 이미 시작됐다면 건너뜀).
+      const targetScrollTop = scrollEl ? scrollEl.scrollTop : null;
+      const expectedVersion = renderVersion + 1;
+      render(src, z).then(() => {
+        if (scrollEl && targetScrollTop !== null && renderVersion === expectedVersion) {
+          scrollEl.scrollTop = targetScrollTop;
+        }
+      });
+    }, 150);
   });
 
   onMount(() => {
@@ -114,6 +158,7 @@
     window.addEventListener('resize', onResize);
     return () => {
       clearTimeout(timer);
+      clearTimeout(zoomRenderTimer);
       window.removeEventListener('resize', onResize);
       renderVersion += 1;
     };
@@ -131,7 +176,12 @@
       </details>
     </div>
   {/if}
-  <div class="pdf-pages" bind:this={container}></div>
+  <div
+    class="pdf-pages"
+    bind:this={container}
+    style:transform={`scale(${zoom / renderedZoom})`}
+    style:transform-origin="top center"
+  ></div>
 </div>
 
 <style>
