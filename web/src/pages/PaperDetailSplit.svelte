@@ -59,11 +59,20 @@
 
   // PdfViewer가 새 배율로 페이지 레이아웃(크기)만 확정한 시점에 호출된다.
   // 아직 캔버스는 그려지는 중이어도 스크롤 위치는 정확히 맞출 수 있다.
+  // scrollTo(smooth)로 부드럽게 이동시킨다 — 연속으로 휠 줌이 들어오면 진행 중인
+  // 애니메이션의 목표 지점만 다음 값으로 계속 갱신되어(브라우저 기본 동작)
+  // 자연스럽게 이어진다. 다만 위치가 순간이동해야 이해가 되는 상황(모션에 민감한
+  // 사용자, prefers-reduced-motion)에는 즉시 이동시킨다.
   function onPdfLayoutReady() {
     if (!pendingZoomAnchor || !pdfScrollEl) return;
-    pdfScrollEl.scrollLeft = pendingZoomAnchor.nextScrollLeft;
-    pdfScrollEl.scrollTop = pendingZoomAnchor.nextScrollTop;
+    const { nextScrollLeft, nextScrollTop } = pendingZoomAnchor;
     pendingZoomAnchor = null;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    pdfScrollEl.scrollTo({
+      left: nextScrollLeft,
+      top: nextScrollTop,
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    });
   }
 
   // Ctrl/Cmd + 스크롤(트랙패드 핀치도 대부분 브라우저에서 이걸로 들어옴)로 확대/축소.
