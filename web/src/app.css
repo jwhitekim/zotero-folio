@@ -1676,16 +1676,21 @@ a.reader-title svg {
 }
 
 /* 참고문헌 번호·각주 등 PDF 내부/외부 링크를 클릭 가능하게 만드는 레이어.
-   보이는 스타일은 없고(투명), 해당 영역 위에서 커서만 포인터로 바뀐다. */
+   보이는 스타일은 없고(투명), 해당 영역 위에서 커서만 포인터로 바뀐다.
+   레이어 자체는 pointer-events: none — 링크가 없는 나머지 영역까지
+   마우스 이벤트를 가로채면 텍스트 드래그 선택이 막혀버리기 때문이다.
+   실제 링크가 있는 부분(section)만 다시 auto로 열어둔다. */
 .annotationLayer {
   position: absolute;
   z-index: 3;
   inset: 0;
+  pointer-events: none;
   transform-origin: 0 0;
 }
 
 .annotationLayer section {
   position: absolute;
+  pointer-events: auto;
 }
 
 .annotationLayer .linkAnnotation > a {
