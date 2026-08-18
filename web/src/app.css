@@ -1683,10 +1683,15 @@ a.reader-title svg {
   z-index: 3;
   inset: 0;
   transform-origin: 0 0;
+  /* 링크가 없는 빈 영역까지 이 레이어가 전부 덮고 있어서, pointer-events를
+     끄지 않으면 텍스트 레이어 위에서 드래그로 텍스트를 선택하는 게
+     막힌다. 실제 링크가 있는 section에서만 아래에서 다시 켠다. */
+  pointer-events: none;
 }
 
 .annotationLayer section {
   position: absolute;
+  pointer-events: auto;
 }
 
 .annotationLayer .linkAnnotation > a {
