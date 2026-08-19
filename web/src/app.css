@@ -1536,8 +1536,21 @@ a.reader-title svg {
   color: var(--accent);
 }
 
-.pdf-scroll {
+/* .pdf-scroll을 감싸는 위치 기준 상자. .split-pdf-pane의 그리드 행(툴바 아래
+   나머지 영역)을 정상적으로 차지하는 건 이 wrap이고, .pdf-scroll 자신은
+   absolute로 그 안을 꽉 채운다 — pdf.js의 PDFViewer가 컨테이너로 쓰는
+   요소는 반드시 absolutely positioned이어야 한다는 제약이 있어서
+   (아니면 생성자에서 바로 에러), 그리드 트랙 크기 계산은 이 wrap에 맡기고
+   .pdf-scroll은 순수하게 "그 안을 채우는 스크롤 상자" 역할만 한다. */
+.pdf-scroll-wrap {
+  position: relative;
+  min-width: 0;
   min-height: 0;
+}
+
+.pdf-scroll {
+  position: absolute;
+  inset: 0;
   overflow: auto;
   overflow-anchor: none;
   /* 가로 스크롤이 끝에 닿으면 맥 트랙패드의 두 손가락 좌우 스와이프가
@@ -1556,120 +1569,15 @@ a.reader-title svg {
   scrollbar-width: thin;
 }
 
-.pdf-viewer {
-  width: min(100%, 900px);
-  margin: 0 auto;
-}
-
-.pdf-pages {
-  display: flex;
-  flex-direction: column;
-  /* width는 여기서 고정값을 주지 않는다 — PdfViewer.svelte의 render()가
-     매 확대/축소마다 실제 페이지 폭(줌 반영값)을 계산해 인라인 style로
-     직접 못박는다. .pdf-viewer(최대 900px로 캡됨)의 width:100%에 기대어
-     그 안에서 flex 자식만 흘러넘치게(overflow) 배치했던 이전 방식은,
-     컨테이너 자체의 폭이 확대해도 안 넓어져 .pdf-scroll의 스크롤 가능
-     영역이 실제로 커진다는 보장이 없었다(브라우저의 overflow 계산에
-     기대는 방식이라 취약함 — 확대해도 좌우가 스크롤로 안 닿고 잘리는
-     버그로 나타났다). 컨테이너 폭을 콘텐츠 폭에 직접 맞추면 .pdf-scroll의
-     scrollWidth가 그 값을 그대로 반영할 수밖에 없어 항상 정확하다. */
-  margin: 0 auto;
-  align-items: center;
-  gap: 1rem;
-}
-
-.pdf-page-wrap {
-  --scale-round-x: 1px;
-  --scale-round-y: 1px;
-  position: relative;
-  flex: 0 0 auto;
-  /* margin:auto는 flex item에서 align-items보다 우선하고, 스펙상 음수가
-     될 수 없어 부모보다 커지면 0으로 떨어져 왼쪽 정렬돼버린다(unsafe
-     center를 줘도 무력화됨). 가운데 정렬은 .pdf-pages의 align-items에만
-     맡긴다. */
-  margin: 0;
-  overflow: hidden;
-  border-radius: 3px;
-  background: #fff;
-  box-shadow: 0 4px 18px rgba(77, 47, 33, 0.15);
-}
-
-.pdf-page {
-  display: block;
-  max-width: none;
-  background: #fff;
-}
-
-.textLayer {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  overflow: clip;
-  color: transparent;
-  line-height: 1;
-  letter-spacing: normal;
-  text-align: initial;
-  text-size-adjust: none;
-  transform-origin: 0 0;
-  forced-color-adjust: none;
-}
-
-.textLayer :is(span, br) {
-  position: absolute;
-  color: transparent;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
-  user-select: text;
-}
-
-.textLayer {
-  --min-font-size: 1;
-  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
-  --min-font-size-inv: calc(1 / var(--min-font-size));
-}
-
-.textLayer > :not(.markedContent),
-.textLayer .markedContent span:not(.markedContent) {
-  z-index: 1;
-  --font-height: 0;
-  --scale-x: 1;
-  --rotate: 0deg;
-  font-size: calc(var(--text-scale-factor) * var(--font-height));
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
-}
-
-.textLayer .markedContent {
-  display: contents;
-}
-
+/* 페이지 캔버스/텍스트 레이어/주석 레이어 자체의 스타일은 이제
+   pdfjs-dist/web/pdf_viewer.css(PdfViewer.svelte에서 import)가 전부
+   책임진다 — 텍스트 선택 중 링크 레이어가 드래그를 가로채지 않게 막는
+   처리까지 이미 포함돼 있어서, 우리가 직접 손으로 맞췄던 .textLayer/
+   .annotationLayer 규칙은 더 필요 없다. 브랜드 톤을 위해 딱 하나,
+   선택 영역 색만 우리 팔레트로 덧입힌다. */
 .textLayer ::selection {
   background: rgba(139, 82, 58, 0.3);
   color: transparent;
-}
-
-/* 참고문헌 번호·각주 등 PDF 내부/외부 링크를 클릭 가능하게 만드는 레이어.
-   보이는 스타일은 없고(투명), 해당 영역 위에서 커서만 포인터로 바뀐다. */
-.annotationLayer {
-  position: absolute;
-  z-index: 3;
-  inset: 0;
-  transform-origin: 0 0;
-  /* 링크가 없는 빈 영역까지 이 레이어가 전부 덮고 있어서, pointer-events를
-     끄지 않으면 텍스트 레이어 위에서 드래그로 텍스트를 선택하는 게
-     막힌다. 실제 링크가 있는 section에서만 아래에서 다시 켠다. */
-  pointer-events: none;
-}
-
-.annotationLayer section {
-  position: absolute;
-  pointer-events: auto;
-}
-
-.annotationLayer .linkAnnotation > a {
-  position: absolute;
-  inset: 0;
-  cursor: pointer;
 }
 
 .pdf-status,
@@ -1698,7 +1606,7 @@ a.reader-title svg {
 
 .split-note-pane {
   overflow-y: auto;
-  padding: 2.2rem 2rem 3rem;
+  padding: 1.3rem 2rem 3rem;
   background: var(--surface);
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
@@ -1772,7 +1680,7 @@ a.reader-title svg {
   }
 
   .split-note-pane {
-    padding: 1.5rem 1.25rem 3rem;
+    padding: 1rem 1.25rem 3rem;
   }
 
   .pdf-pane-toolbar > div:first-child strong {

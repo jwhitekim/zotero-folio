@@ -12,9 +12,8 @@
   const MIN_ZOOM = 0.7;
   const MAX_ZOOM = 3;
 
-  // 가로는 항상 중앙 정렬 — PDF 문서는 커서를 따라 옆으로 쏠리면 안 된다
-  // (PdfViewer의 transform-origin이 "50% 0"으로 고정되어 있어 확대해도
-  // 가로 방향은 항상 대칭으로 커진다. 아래 onPdfLayoutReady에서 재확정만 함).
+  // 가로 중앙 정렬은 PdfViewer.svelte 내부(pdf.js 엔진의 페이지 auto-margin)가
+  // 알아서 맞춘다 — 여기서는 세로만 다룬다.
   //
   // 세로는 "커서(또는 화면 중앙)가 가리키던 지점"이 화면상 같은 위치에 남도록
   // 스크롤을 매번 그 자리에서 즉시 보정한다. CSS 확대 미리보기(transform:
@@ -37,14 +36,6 @@
 
   function changeZoom(delta) {
     zoomTo(pdfZoom + delta);
-  }
-
-  // PdfViewer가 새 배율로 실제 페이지 크기를 확정한 시점에 호출된다. 세로는
-  // zoomTo에서 이미 실시간으로 보정해뒀으니 건드리지 않고, 가로만 실제
-  // 콘텐츠 너비 기준으로 다시 정확히 가운데를 맞춘다.
-  function onPdfLayoutReady() {
-    if (!pdfScrollEl) return;
-    pdfScrollEl.scrollLeft = (pdfScrollEl.scrollWidth - pdfScrollEl.clientWidth) / 2;
   }
 
   // Ctrl/Cmd + 스크롤(트랙패드 핀치도 대부분 브라우저에서 이걸로 들어옴)로 확대/축소.
@@ -80,11 +71,13 @@
       <Icon name="panel" size={16} />
     </button>
   </div>
-  <div class="pdf-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
-    {#if hasPdf}
-      <PdfViewer src={pdfUrl} zoom={pdfZoom} onLayoutReady={onPdfLayoutReady} />
-    {:else}
-      <div class="pdf-empty"><Icon name="file" size={25} /><p>첨부된 PDF가 없어요.</p></div>
-    {/if}
+  <div class="pdf-scroll-wrap">
+    <div class="pdf-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
+      {#if hasPdf}
+        <PdfViewer src={pdfUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} />
+      {:else}
+        <div class="pdf-empty"><Icon name="file" size={25} /><p>첨부된 PDF가 없어요.</p></div>
+      {/if}
+    </div>
   </div>
 </section>
