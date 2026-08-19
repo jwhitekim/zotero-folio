@@ -168,7 +168,12 @@
       const pdf = await getDocument(url);
       if (version !== renderVersion) return;
 
-      const availableWidth = Math.min(container.clientWidth, 900);
+      // container(.pdf-pages) 자신의 width는 아래에서 콘텐츠 폭에 맞춰
+      // 매번 인라인으로 덮어써서(확대 시 실제로 넓어지게), 리사이즈로 뷰포트가
+      // 좁아져도 스스로는 더 이상 반응형으로 줄어들지 않는다 — "쓸 수 있는
+      // 폭"은 항상 반응형인 부모(.pdf-viewer, CSS로 min(100%,900px) 유지)
+      // 기준으로 읽어야 최신 값이 된다.
+      const availableWidth = Math.min(container.parentElement.clientWidth, 900);
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
 
       // 1단계: 모든 페이지의 크기를 먼저 계산해 wrap을 만들어둔다. 아직 DOM에는
@@ -197,6 +202,24 @@
 
       if (version !== renderVersion) return;
 
+      // .pdf-pages는 원래 width:100%(=.pdf-viewer의 최대 900px)에 기대어 그
+      // 안에서 flex로 페이지를 넘치게 배치했는데, 그러면 확대해도 컨테이너
+      // 자체의 폭은 안 넓어지고 자식만 넘쳐서(overflow) .pdf-scroll의
+      // 스크롤 가능 영역이 실제 확대된 만큼 커진다는 보장이 없었다(브라우저의
+      // overflow 계산에 기대는 방식이라 취약함 — 실제로 좌우가 스크롤로 안
+      // 닿고 잘리는 버그로 나타났다). 페이지 폭을 컨테이너 자체의 width로
+      // 직접 못박아두면 .pdf-scroll의 scrollWidth가 그 값을 그대로 반영할
+      // 수밖에 없어 항상 정확하다. 단, 이 값을 여기서 바로 적용하면 안 된다
+      // (재렌더링 분기에서 겪은 버그) — width는 새 배율 기준인데 아직 화면엔
+      // 이전 배율의 콘텐츠가 CSS 확대 미리보기(transform: scale) 상태로
+      // 남아있어서, transform-origin: 50% 0의 기준(컨테이너 자신의 폭의
+      // 50%)이 페인트가 끝나기도 전에 새 폭으로 바뀌어버려 그 사이 확대
+      // 미리보기가 엉뚱한 기준점으로 튀어 보였다. 그래서 실제 폭 적용은
+      // transform을 scale(1)로 되돌리고 새 콘텐츠로 교체하는 것과 같은
+      // 틱에서, 두 분기 모두 페인트가 끝난 뒤에만 한다.
+      const maxPageWidth = Math.max(...pages.map((p) => p.viewport.width));
+      const contentWidth = `${Math.max(availableWidth, maxPageWidth)}px`;
+
       if (isFirstShow) {
         // 최초 로딩: 배치를 먼저 확정해 커서 앵커/전체 높이를 잡아 화면에 붙이고,
         // 페이지는 그린 순서대로 바로바로 공개한다 — 긴 논문일수록 첫 페이지를
@@ -206,6 +229,7 @@
         // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
         // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
         container.style.transform = 'scale(1)';
+        container.style.width = contentWidth;
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
 
@@ -223,6 +247,7 @@
         // 재렌더링(확대/축소·리사이즈): 이미 화면에 뭔가 보이고 있으므로, 전부
         // 그릴 때까지 기존 내용을 그대로 둔 채 기다렸다가 한 번에 교체한다.
         // 중간에 빈 화면이나 로딩 문구가 끼어들며 번쩍이는 걸 막기 위해서다.
+        // (width도 같은 이유로 이 루프가 끝난 뒤에야 적용한다 — 위 주석 참고.)
         for (const entry of pages) {
           await paintPage(entry, outputScale);
           if (version !== renderVersion) return;
@@ -232,6 +257,7 @@
         // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
         // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
         container.style.transform = 'scale(1)';
+        container.style.width = contentWidth;
         container.replaceChildren(...pages.map((p) => p.pageWrap));
         onLayoutReady?.();
       }
