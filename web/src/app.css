@@ -86,7 +86,7 @@ textarea:focus-visible {
 }
 
 #app {
-  width: min(100%, 760px);
+  width: min(100%, 960px);
   min-height: 100vh;
   margin: 0 auto;
   position: relative;
@@ -809,8 +809,7 @@ button:disabled {
   transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
-.icon-action:hover:not(:disabled),
-.save-btn:hover:not(:disabled) {
+.icon-action:hover:not(:disabled) {
   background: var(--accent-strong);
   transform: translateY(-1px);
 }
@@ -1060,6 +1059,10 @@ textarea::placeholder {
 .paper-list,
 .collection-grid {
   display: grid;
+  /* 명시적으로 minmax(0, 1fr)을 안 쓰면 그리드 트랙 폭이 auto로 잡혀서,
+     안의 카드가 줄어들 수 없는 콘텐츠(긴 제목/단어 등)를 만나면 트랙 자체가
+     넓어지며 #app/main 밖으로 카드가 삐져나가는 문제가 있었다. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.48rem;
 }
 
@@ -1067,6 +1070,7 @@ textarea::placeholder {
 .collection-card {
   position: relative;
   display: flex;
+  min-width: 0;
   align-items: center;
   width: 100%;
   overflow: hidden;
@@ -1246,7 +1250,6 @@ textarea::placeholder {
   gap: 1.25rem;
 }
 
-.paper-hero-icon,
 .collection-hero-icon {
   display: grid;
   flex: 0 0 auto;
@@ -1274,49 +1277,6 @@ textarea::placeholder {
   height: 58px;
   border-radius: 16px;
   box-shadow: none;
-}
-
-.detail-authors {
-  margin: 0.3rem 0 0.85rem;
-  color: var(--text-soft);
-  font-size: 0.83rem;
-  line-height: 1.65;
-}
-
-.detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.detail-meta span {
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  background: var(--surface-subtle);
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-
-.pdf-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin: 1.5rem 0 0;
-  padding: 0.65rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface-subtle);
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-decoration: none;
-  transition: border-color 160ms ease, transform 160ms ease;
-}
-
-.pdf-link:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
 }
 
 /* --- PDF 뷰어 + 노트 읽기 화면 --- */
@@ -1744,106 +1704,6 @@ a.reader-title svg {
   scrollbar-width: thin;
 }
 
-.split-paper-header {
-  padding-bottom: 1.6rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.split-note-pane h1 {
-  margin-bottom: 0.8rem;
-  font-size: clamp(1.55rem, 2.3vw, 2rem);
-  line-height: 1.22;
-}
-
-.split-note-pane .detail-authors {
-  margin-bottom: 1rem;
-  font-size: 0.77rem;
-  line-height: 1.7;
-}
-
-.split-note-pane .detail-meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.split-note-pane .detail-meta i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.split-note-pane .detail-memo {
-  margin-top: 1.65rem;
-  padding-top: 0;
-  border-top: 0;
-}
-
-/* 저장 버튼(.editor-actions)이 이 헤더 안에 같이 들어있어서, 헤더 전체를
-   스크롤해도 계속 보이게 고정해둔다 — top: 0이면 이 요소가 원래 있던
-   자리(split-paper-header 아래)에 가만히 있다가, 스크롤로 그 자리가
-   뷰포트 위로 넘어가려는 순간부터만 붙잡혀 고정된다. 그 위에 있는
-   split-paper-header를 침범하지 않는다(예전엔 음수 top/margin을 써서
-   이 요소가 스크롤 컨테이너의 맨 처음 자식이라고 잘못 가정했다가, 바로
-   위 요소를 끌어올려 겹쳐 보이는 버그가 났었다). */
-.split-note-pane .detail-memo-header {
-  align-items: flex-start;
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  margin: 0 -0.5rem 1rem;
-  padding: 0.6rem 0.5rem;
-  background: var(--surface);
-}
-
-.split-note-pane .detail-memo-header > span {
-  width: 34px;
-  height: 34px;
-}
-
-.split-note-pane .memo-card {
-  border-radius: 13px;
-  box-shadow: none;
-}
-
-.split-paper-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.delete-confirm {
-  margin-top: 1rem;
-  padding: 0.85rem;
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  border-radius: 13px;
-  background: var(--danger-soft);
-}
-
-.delete-confirm p {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
-
-.delete-confirm-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-}
-
-/* 저장 버튼은 detail-memo-header 안에서 아이콘+제목과 같은 줄(동등하게)에
-   놓인다 — margin-left: auto로 나머지 공간을 밀어내 오른쪽 끝에 붙인다.
-   헤더 자체를 고정(sticky)하는 건 .split-note-pane .detail-memo-header가
-   담당(스크롤해도 저장 버튼이 계속 보이는 요구사항은 그쪽에서 충족됨). */
-.detail-memo-header .editor-actions {
-  margin-left: auto;
-  margin-top: 0;
-  align-self: center;
-}
-
 @media (max-width: 900px) {
   .reader-topbar {
     height: 56px;
@@ -1921,75 +1781,10 @@ a.reader-title svg {
   }
 }
 
-.detail-memo {
-  margin-top: 2.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border);
-}
-
-.detail-memo-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.detail-memo-header > span {
-  display: grid;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--accent-pale);
-  color: var(--accent);
-}
-
-.detail-memo-header h2 {
-  margin-bottom: 0.18rem;
-}
-
-.detail-memo-header p {
-  margin-bottom: 0;
-  color: var(--text-muted);
-  font-size: 0.72rem;
-}
-
-.memo-card {
-  margin-bottom: 0.8rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.section-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 0.6rem;
-}
-
-.section-title-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  outline: 0;
-  background: var(--surface-subtle);
-  color: var(--text);
-  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
-  font-size: 1rem;
-  font-weight: 700;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.section-title-input:focus {
-  border-color: var(--accent);
-  background: var(--surface);
-}
+/* StructuredNote 컴포넌트 자체 마크업(노트 항목/단어장 입력 폼 등)의 스타일은
+   web/src/components/StructuredNote.svelte의 <style>로 옮겨졌다 — 컴포넌트가
+   자기 모양을 스스로 책임지도록. 이 페이지 저 페이지 전역으로 여러 컴포넌트가
+   공유하는 유틸리티 클래스만 아래에 남긴다. */
 
 .icon-btn {
   display: grid;
@@ -2008,153 +1803,8 @@ a.reader-title svg {
   color: var(--danger);
 }
 
-.add-buttons-row {
-  display: flex;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
-}
-
-.add-section-btn {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  padding: 0.65rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--text-soft);
-  font-size: 0.8rem;
-  font-weight: 650;
-  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
-}
-
-.add-section-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-pale);
-  color: var(--accent);
-}
-
-.hint {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-}
-
-.vocab-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.vocab-word-input,
-.vocab-meaning-input {
-  min-width: 0;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  outline: 0;
-  background: var(--surface-subtle);
-  color: var(--text);
-  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
-  font-size: 1rem;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.vocab-word-input:focus,
-.vocab-meaning-input:focus {
-  border-color: var(--accent);
-  background: var(--surface);
-}
-
-.vocab-word-input {
-  flex: 1;
-}
-
-.vocab-meaning-input {
-  flex: 2;
-}
-
-.add-word-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  width: auto;
-  padding: 0.4rem 0.7rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text-soft);
-  font-size: 0.72rem;
-  font-weight: 650;
-  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
-}
-
-.add-word-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-pale);
-  color: var(--accent);
-}
-
-.structured-note textarea {
-  display: block;
-  width: 100%;
-  min-height: 100px;
-  resize: vertical;
-  padding: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  outline: 0;
-  background: var(--surface-subtle);
-  color: var(--text);
-  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
-  font-size: 1rem;
-  line-height: 1.75;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
-}
-
-.structured-note textarea:focus {
-  border-color: var(--accent);
-  background: var(--surface);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.editor-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-top: 0.65rem;
-}
-
-.editor-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  color: var(--text-muted);
-  font-size: 0.67rem;
-}
-
-.saved-status {
-  color: var(--accent);
-}
-
 .status.error {
   color: var(--danger);
-}
-
-.save-btn {
-  flex: 0 0 auto;
-  min-height: 38px;
-  padding: 0.5rem 0.8rem;
-  border-radius: 10px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  transition: transform 160ms ease, background 160ms ease;
 }
 
 .tabbar-row {
@@ -2291,7 +1941,7 @@ a.reader-title svg {
 }
 
 /* 데스크톱 탭바는 900px 초과에서만 보인다 — 모바일의 떠 있는 캡슐 대신,
-   칼럼(#app, 최대 760px) 상단에 고정된 평평한 헤더 형태를 쓴다. */
+   칼럼(#app, 최대 960px) 상단에 고정된 평평한 헤더 형태를 쓴다. */
 .tabbar-desktop {
   display: none;
 }
@@ -2310,7 +1960,7 @@ a.reader-title svg {
     min-height: 58px;
     align-items: center;
     justify-content: center;
-    width: min(100%, 760px);
+    width: min(100%, 960px);
     gap: 0.3rem;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid var(--border);
