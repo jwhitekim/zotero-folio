@@ -194,18 +194,9 @@
           {/if}
         </div>
 
-        <section class="detail-memo">
-          <div class="detail-memo-header">
-            <span><Icon name="note" size={19} /></span>
-            <div>
-              <h2>이 논문의 노트</h2>
-              <p>읽으면서 발견한 주장과 질문을 직접 정리해 보세요.</p>
-            </div>
-          </div>
-          {#key itemKey}
-            <StructuredNote initialSections={paper.memo?.sections ?? []} onSave={saveMemo} />
-          {/key}
-        </section>
+        {#key itemKey}
+          <StructuredNote initialSections={paper.memo?.sections ?? []} onSave={saveMemo} />
+        {/key}
       </aside>
     </div>
   {/if}
