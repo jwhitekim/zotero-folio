@@ -151,6 +151,29 @@
     });
     linkService.setViewer(pdfViewer);
 
+    // 참고문헌/각주 링크를 클릭해도 조용히 아무 반응이 없던 버그의 원인: pdf.js의
+    // 내부 scrollIntoView 유틸은 대상 페이지 div에서 offsetParent를 타고 올라가며
+    // "실제 스크롤 컨테이너"를 자기가 알아서 찾는데, .pdfViewer에 확대 미리보기용
+    // transform이 걸려 있으면(scale(1)이어도 마찬가지 — transform 유무 자체가
+    // 기준) 그 탐색이 .pdfViewer 자신에서 멈춰버린다. .pdfViewer는 overflow:visible
+    // 이라 스크롤이 안 되는 요소라서, scrollTop을 대입해도 조용히 무시되고 실제
+    // 스크롤 컨테이너(.pdf-scroll)까지는 못 올라간다.
+    // goToDestination 안에서만 보정한다 — pdfViewer.scrollPageIntoView 자체를
+    // 덮어쓰면 확대/축소 시 pdf.js가 내부적으로 호출하는 재중심 로직까지 건드리게
+    // 되는데, 그건 PdfPane.svelte가 이미 커서 기준으로 직접 스크롤을 보정하고
+    // 있어서 손대면 오히려 그 보정과 충돌한다.
+    const _origGoToDestination = linkService.goToDestination.bind(linkService);
+    linkService.goToDestination = async (dest) => {
+      await _origGoToDestination(dest);
+      const pageDiv = pdfViewer._pages?.[pdfViewer.currentPageNumber - 1]?.div;
+      if (pageDiv && scrollContainer) {
+        const target =
+          scrollContainer.scrollTop +
+          (pageDiv.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top);
+        scrollContainer.scrollTop = Math.max(0, target);
+      }
+    };
+
     const eventAbort = new AbortController();
     eventBus.on(
       'pagesinit',
