@@ -21,9 +21,24 @@
     resize();
     requestAnimationFrame(resize);
     node.addEventListener('input', resize);
+
+    // 모바일에서 처음에 "노트" 탭이 아니라 "원문" 탭으로 열리면, 이
+    // textarea는 조상(.split-note-pane)이 display:none인 채로 마운트된다
+    // — 그 상태에서 잰 scrollHeight는 항상 0이라 위 두 번의 측정이 다
+    // 무의미해지고, 이후 사용자가 탭을 "노트"로 옮겨도(=글자 입력 없이
+    // 다시 보이기만 함) input 이벤트가 없어 재측정이 안 돼 CSS
+    // min-height(90px)에 눌린 채로 굳어버렸다. ResizeObserver는 조상의
+    // display:none이 풀려 이 요소가 실제로 다시 보이게 되는 순간도 "크기
+    // 변화"로 잡아내므로, 그 시점에 다시 재본다. 우리가 직접 맞춘 높이는
+    // 재적용해도 크기가 안 바뀌어 알림이 다시 발생하지 않으니 별도의
+    // 무한루프 방지 로직 없이도 안전하다.
+    const observer = new ResizeObserver(resize);
+    observer.observe(node);
+
     return {
       destroy() {
         node.removeEventListener('input', resize);
+        observer.disconnect();
       },
     };
   }
