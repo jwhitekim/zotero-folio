@@ -195,7 +195,7 @@
         </div>
 
         {#key itemKey}
-          <StructuredNote initialSections={paper.memo?.sections ?? []} onSave={saveMemo} />
+          <StructuredNote initialSections={paper.memo?.sections ?? []} onSave={saveMemo} draftKey={itemKey} />
         {/key}
       </aside>
     </div>
