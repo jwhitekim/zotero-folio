@@ -1,6 +1,7 @@
 <script>
   import { api } from '../services/api.js';
   import Icon from '../components/Icon.svelte';
+  import PaperCard from '../components/PaperCard.svelte';
 
   let {
     onOpenPaper,
@@ -69,6 +70,11 @@
   $effect(() => {
     inputEl?.focus();
   });
+
+  async function deletePaper(itemKey) {
+    await api.deletePaper(itemKey);
+    papers = papers.filter((p) => p.itemKey !== itemKey);
+  }
 </script>
 
 <header class="search-page-header">
@@ -120,17 +126,7 @@
   {:else}
     <div class="paper-list">
       {#each papers as p (p.itemKey)}
-        <button class="paper-card" onclick={() => onOpenPaper(p.itemKey)}>
-          <span class="paper-file"><Icon name="file" size={21} /></span>
-          <span class="paper-content">
-            <span class="title">{p.title}</span>
-            <span class="paper-meta-row">
-              <span class="sub">{p.authors.join(', ') || '저자 미상'}{p.year ? ` · ${p.year}` : ''}</span>
-              {#if p.hasPdf}<span class="tag">PDF</span>{/if}
-            </span>
-          </span>
-          <span class="chevron"><Icon name="chevron" size={18} /></span>
-        </button>
+        <PaperCard paper={p} onOpen={onOpenPaper} onDelete={deletePaper} />
       {/each}
     </div>
   {/if}
