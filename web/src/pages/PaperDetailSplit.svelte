@@ -19,7 +19,7 @@
   let deleteError = $state('');
 
   const MIN_ZOOM = 0.7;
-  const MAX_ZOOM = 2;
+  const MAX_ZOOM = 3;
 
   // 가로는 항상 중앙 정렬 — PDF 문서는 커서를 따라 옆으로 쏠리면 안 된다
   // (PdfViewer의 transform-origin이 "50% 0"으로 고정되어 있어 확대해도

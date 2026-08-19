@@ -1580,6 +1580,10 @@ a.reader-title svg {
   min-height: 0;
   overflow: auto;
   overflow-anchor: none;
+  /* 가로 스크롤이 끝에 닿으면 맥 트랙패드의 두 손가락 좌우 스와이프가
+     브라우저 뒤로/앞으로가기 제스처로 새서 페이지가 넘어가버린다.
+     contain으로 스크롤을 이 요소 안에 가둬 그 누출을 막는다. */
+  overscroll-behavior-x: contain;
   padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 3rem;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
@@ -1592,17 +1596,18 @@ a.reader-title svg {
 
 .pdf-pages {
   display: flex;
-  width: 100%;
   flex-direction: column;
-  /* 페이지가 확대돼 뷰어 박스보다 넓어지면, 최신 Chrome은 align-items:
-     center를 "safe centering"으로 처리해 왼쪽 정렬로 fallback해버린다
-     (넘치는 콘텐츠가 스크롤로 닿을 수 없을 때만 필요한 안전장치인데,
-     .pdf-scroll은 어차피 스크롤 가능하므로 불필요). unsafe로 명시해서
-     항상 대칭으로 가운데 정렬되게 한다. unsafe를 모르는 구형 브라우저는
-     이 줄을 무시하고 위의 center로 fallback된다.
-  */
+  /* width는 여기서 고정값을 주지 않는다 — PdfViewer.svelte의 render()가
+     매 확대/축소마다 실제 페이지 폭(줌 반영값)을 계산해 인라인 style로
+     직접 못박는다. .pdf-viewer(최대 900px로 캡됨)의 width:100%에 기대어
+     그 안에서 flex 자식만 흘러넘치게(overflow) 배치했던 이전 방식은,
+     컨테이너 자체의 폭이 확대해도 안 넓어져 .pdf-scroll의 스크롤 가능
+     영역이 실제로 커진다는 보장이 없었다(브라우저의 overflow 계산에
+     기대는 방식이라 취약함 — 확대해도 좌우가 스크롤로 안 닿고 잘리는
+     버그로 나타났다). 컨테이너 폭을 콘텐츠 폭에 직접 맞추면 .pdf-scroll의
+     scrollWidth가 그 값을 그대로 반영할 수밖에 없어 항상 정확하다. */
+  margin: 0 auto;
   align-items: center;
-  align-items: unsafe center;
   gap: 1rem;
 }
 
