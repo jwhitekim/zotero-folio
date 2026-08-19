@@ -92,14 +92,35 @@ function noteHtmlToText(html) {
     .trim();
 }
 
+// 단어장 항목(word/meaning 쌍 목록) ↔ HTML <ul> 리스트.
+function vocabToHtml(words) {
+  const rows = (words || [])
+    .map(
+      ({ word, meaning }) =>
+        `<li><strong>${escapeHtml(word || '')}</strong>: ${escapeHtml(meaning || '')}</li>`
+    )
+    .join('\n');
+  return `<ul>\n${rows}\n</ul>`;
+}
+
+function htmlToVocab(html) {
+  const items = [...html.matchAll(/<li>\s*<strong>([\s\S]*?)<\/strong>:\s*([\s\S]*?)<\/li>/g)];
+  return items.map(([, word, meaning]) => ({
+    word: noteHtmlToText(word).trim(),
+    meaning: noteHtmlToText(meaning).trim(),
+  }));
+}
+
 // 항목(section) 배열 ↔ Zotero note HTML. 항목 제목/내용은 전부 사용자가
 // 직접 입력한 것 — 여기서 하는 일은 순수 서식 변환뿐, 생성하는 것 없음.
+// type이 'vocab'이면 단어/뜻 목록을, 그 외(기본 'text')는 기존처럼 자유
+// 텍스트 문단을 직렬화한다.
 function sectionsToNoteHtml(sections) {
   return sections
-    .map(
-      ({ title, content }) =>
-        `<h3>${escapeHtml(title || '제목 없음')}</h3>\n${paragraphsToHtml(content)}`
-    )
+    .map(({ type, title, content, words }) => {
+      const body = type === 'vocab' ? vocabToHtml(words) : paragraphsToHtml(content);
+      return `<h3>${escapeHtml(title || '제목 없음')}</h3>\n${body}`;
+    })
     .join('\n');
 }
 
@@ -109,12 +130,15 @@ function noteHtmlToSections(html) {
   if (matches.length === 0) {
     // 예전 형식(제목 없는 통짜 텍스트) 호환 — "메모" 항목 하나로 보여줌
     const text = noteHtmlToText(html);
-    return text ? [{ title: '메모', content: text }] : [];
+    return text ? [{ type: 'text', title: '메모', content: text }] : [];
   }
-  return matches.map(([, title, body]) => ({
-    title: noteHtmlToText(title).trim(),
-    content: noteHtmlToText(body),
-  }));
+  return matches.map(([, title, body]) => {
+    const trimmedBody = body.trim();
+    if (/^<ul/i.test(trimmedBody)) {
+      return { type: 'vocab', title: noteHtmlToText(title).trim(), words: htmlToVocab(trimmedBody) };
+    }
+    return { type: 'text', title: noteHtmlToText(title).trim(), content: noteHtmlToText(body) };
+  });
 }
 
 // --- sync ------------------------------------------------------------------

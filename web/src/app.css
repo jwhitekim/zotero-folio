@@ -1584,6 +1584,13 @@ a.reader-title svg {
      브라우저 뒤로/앞으로가기 제스처로 새서 페이지가 넘어가버린다.
      contain으로 스크롤을 이 요소 안에 가둬 그 누출을 막는다. */
   overscroll-behavior-x: contain;
+  /* Windows는 세로 스크롤바가 레이아웃 폭을 15~17px 차지하는 클래식
+     스크롤바라서, 확대로 페이지가 뷰포트보다 길어져 스크롤바가 막 나타나는
+     순간 clientWidth가 갑자기 줄어든다 — 그 직후 렌더는 좁아진 폭 기준으로
+     다시 중앙정렬하면서 콘텐츠가 오른쪽으로 밀린 것처럼 보인다(맥은 오버레이
+     스크롤바라 폭을 차지하지 않아 이 현상이 없다). stable로 스크롤바가 실제로
+     나타나든 안 나타나든 그 공간을 항상 미리 비워둬서 폭이 흔들리지 않게 한다. */
+  scrollbar-gutter: stable;
   padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 3rem;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
@@ -1773,8 +1780,21 @@ a.reader-title svg {
   border-top: 0;
 }
 
+/* 저장 버튼(.editor-actions)이 이 헤더 안에 같이 들어있어서, 헤더 전체를
+   스크롤해도 계속 보이게 고정해둔다 — top: 0이면 이 요소가 원래 있던
+   자리(split-paper-header 아래)에 가만히 있다가, 스크롤로 그 자리가
+   뷰포트 위로 넘어가려는 순간부터만 붙잡혀 고정된다. 그 위에 있는
+   split-paper-header를 침범하지 않는다(예전엔 음수 top/margin을 써서
+   이 요소가 스크롤 컨테이너의 맨 처음 자식이라고 잘못 가정했다가, 바로
+   위 요소를 끌어올려 겹쳐 보이는 버그가 났었다). */
 .split-note-pane .detail-memo-header {
   align-items: flex-start;
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  margin: 0 -0.5rem 1rem;
+  padding: 0.6rem 0.5rem;
+  background: var(--surface);
 }
 
 .split-note-pane .detail-memo-header > span {
@@ -1814,13 +1834,14 @@ a.reader-title svg {
   margin-top: 0.7rem;
 }
 
-.split-note-pane .editor-actions {
-  position: sticky;
-  z-index: 2;
-  bottom: -1rem;
-  margin: 0 -0.5rem -1rem;
-  padding: 0.8rem 0.5rem 1rem;
-  background: linear-gradient(transparent, var(--surface) 25%);
+/* 저장 버튼은 detail-memo-header 안에서 아이콘+제목과 같은 줄(동등하게)에
+   놓인다 — margin-left: auto로 나머지 공간을 밀어내 오른쪽 끝에 붙인다.
+   헤더 자체를 고정(sticky)하는 건 .split-note-pane .detail-memo-header가
+   담당(스크롤해도 저장 버튼이 계속 보이는 요구사항은 그쪽에서 충족됨). */
+.detail-memo-header .editor-actions {
+  margin-left: auto;
+  margin-top: 0;
+  align-self: center;
 }
 
 @media (max-width: 900px) {
@@ -1987,14 +2008,19 @@ a.reader-title svg {
   color: var(--danger);
 }
 
+.add-buttons-row {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
 .add-section-btn {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  width: 100%;
   padding: 0.65rem;
-  margin-bottom: 1rem;
   border: 1px dashed var(--border-strong);
   border-radius: 12px;
   background: transparent;
@@ -2005,6 +2031,68 @@ a.reader-title svg {
 }
 
 .add-section-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-pale);
+  color: var(--accent);
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.vocab-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.vocab-word-input,
+.vocab-meaning-input {
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: 0;
+  background: var(--surface-subtle);
+  color: var(--text);
+  /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
+  font-size: 1rem;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.vocab-word-input:focus,
+.vocab-meaning-input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.vocab-word-input {
+  flex: 1;
+}
+
+.vocab-meaning-input {
+  flex: 2;
+}
+
+.add-word-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: auto;
+  padding: 0.4rem 0.7rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 650;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.add-word-btn:hover {
   border-color: var(--accent);
   background: var(--accent-pale);
   color: var(--accent);
