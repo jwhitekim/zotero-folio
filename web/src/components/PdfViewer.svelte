@@ -12,7 +12,7 @@
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-  // scrollContainer: 실제로 스크롤되는 요소(PdfPane.svelte의 .pdf-scroll) —
+  // scrollContainer: 실제로 스크롤되는 요소(PdfPane.svelte의 .viewer-scroll) —
   // PDFViewer가 스크롤 위치/가시 영역을 직접 읽고 쓰는 대상이라, 우리 것과
   // 같은 요소를 넘겨줘야 확대 시 커서 고정 스크롤 보정(PdfPane.svelte의
   // zoomTo)이 계속 같은 스크롤 위치 기준으로 동작한다.
@@ -157,7 +157,7 @@
     // transform이 걸려 있으면(scale(1)이어도 마찬가지 — transform 유무 자체가
     // 기준) 그 탐색이 .pdfViewer 자신에서 멈춰버린다. .pdfViewer는 overflow:visible
     // 이라 스크롤이 안 되는 요소라서, scrollTop을 대입해도 조용히 무시되고 실제
-    // 스크롤 컨테이너(.pdf-scroll)까지는 못 올라간다.
+    // 스크롤 컨테이너(.viewer-scroll)까지는 못 올라간다.
     // goToDestination 안에서만 보정한다 — pdfViewer.scrollPageIntoView 자체를
     // 덮어쓰면 확대/축소 시 pdf.js가 내부적으로 호출하는 재중심 로직까지 건드리게
     // 되는데, 그건 PdfPane.svelte가 이미 커서 기준으로 직접 스크롤을 보정하고
