@@ -11,6 +11,12 @@
   let syncing = $state(false);
   let syncStatus = $state('');
 
+  let showAddForm = $state(false);
+  let webpageUrl = $state('');
+  let adding = $state(false);
+  let addError = $state('');
+  let addUrlInput = $state();
+
   async function load() {
     loading = true;
     error = '';
@@ -42,6 +48,29 @@
     papers = papers.filter((p) => p.itemKey !== itemKey);
   }
 
+  function toggleAddForm() {
+    showAddForm = !showAddForm;
+    addError = '';
+    if (showAddForm) queueMicrotask(() => addUrlInput?.focus());
+  }
+
+  async function submitWebpage() {
+    const url = webpageUrl.trim();
+    if (!url) return;
+    adding = true;
+    addError = '';
+    try {
+      await api.addWebpage(url);
+      webpageUrl = '';
+      showAddForm = false;
+      await load();
+    } catch (err) {
+      addError = err.message;
+    } finally {
+      adding = false;
+    }
+  }
+
   load();
 </script>
 
@@ -51,11 +80,37 @@
     <h1>내 라이브러리</h1>
     <p class="page-description">읽고, 생각하고, 내 언어로 남겨보세요.</p>
   </div>
-  <button class="icon-action" onclick={runSync} disabled={syncing} aria-label="Zotero 동기화">
-    <span class:spinning={syncing}><Icon name="refresh" size={19} /></span>
-    <span>{syncing ? '동기화 중' : '동기화'}</span>
-  </button>
+  <div class="home-actions">
+    <button class="icon-action secondary" onclick={toggleAddForm} aria-pressed={showAddForm} aria-label="웹페이지 추가">
+      <Icon name="plus" size={16} />
+      <span>웹페이지 추가</span>
+    </button>
+    <button class="icon-action" onclick={runSync} disabled={syncing} aria-label="Zotero 동기화">
+      <span class:spinning={syncing}><Icon name="refresh" size={19} /></span>
+      <span>{syncing ? '동기화 중' : '동기화'}</span>
+    </button>
+  </div>
 </header>
+{#if showAddForm}
+  <form class="search-field" onsubmit={(e) => { e.preventDefault(); submitWebpage(); }}>
+    <Icon name="external" size={19} />
+    <input
+      bind:this={addUrlInput}
+      type="url"
+      class="search-input"
+      placeholder="https://example.com/article"
+      aria-label="추가할 웹페이지 URL"
+      bind:value={webpageUrl}
+      disabled={adding}
+    />
+    <button class="icon-action" type="submit" disabled={adding || !webpageUrl.trim()}>
+      {adding ? '추가 중' : '추가'}
+    </button>
+  </form>
+  {#if addError}
+    <p class="notice error-state"><Icon name="alert" size={15} /> {addError}</p>
+  {/if}
+{/if}
 {#if syncStatus}
   <p class="notice"><Icon name="check" size={15} /> {syncStatus}</p>
 {/if}

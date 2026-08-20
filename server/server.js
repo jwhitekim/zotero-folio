@@ -7,6 +7,7 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
+import AdmZip from 'adm-zip';
 
 import {
   getLastVersion,
@@ -22,11 +23,13 @@ import {
 } from './db.js';
 import {
   fetchChangedTopItems,
+  fetchChangedAttachmentParentKeys,
   fetchDeletedItemKeys,
   fetchItem,
-  findPdfAttachment,
+  findReadableAttachment,
   findChildNoteByTag,
   createChildNote,
+  createWebpageItem,
   updateNote,
   deleteItem,
   listCollections,
@@ -66,6 +69,28 @@ function cleanTitle(title, itemType) {
   if (itemType !== 'webpage' || !title) return title;
   const idx = title.indexOf(' | ');
   return idx > 0 ? title.slice(0, idx).trim() : title;
+}
+
+// 웹페이지 추가 시 제목을 직접 입력 안 하면 페이지 <title> 태그로 채운다.
+// 실패해도(타임아웃, 4xx 등) 조용히 넘어가고 URL 자체를 제목으로 쓴다 —
+// 이 도구의 역할은 "Zotero에 아이템을 만드는 것"까지고, 본문 파싱은 하지 않는다.
+async function fetchPageTitle(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Folio/1.0)' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    return match ? match[1].trim().replace(/\s+/g, ' ') : null;
+  } catch (err) {
+    console.error('[papers webpage] 제목 조회 실패:', err.message);
+    return null;
+  }
 }
 
 function escapeHtml(s) {
@@ -148,20 +173,40 @@ async function doSync() {
   const lastVersion = getLastVersion();
   const { items, newVersion } = await fetchChangedTopItems(lastVersion);
 
+  // 기존 아이템에 첨부파일만 새로 붙은 경우 부모 아이템 자체는 top-level
+  // since 조회에 안 걸린다 (부모 version이 안 바뀜) — 별도로 찾아서 합친다.
+  const topKeys = new Set(items.map((i) => i.key));
+  try {
+    const parentKeys = await fetchChangedAttachmentParentKeys(lastVersion);
+    for (const key of parentKeys) {
+      if (topKeys.has(key)) continue;
+      try {
+        const parent = await fetchItem(key);
+        items.push(parent);
+        topKeys.add(key);
+      } catch (err) {
+        console.error(`[sync] 첨부 변경 부모 조회 실패: ${key} - ${err.message}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[sync] 첨부 변경 목록 조회 실패: ${err.message}`);
+  }
+
   let cached = 0;
   for (const item of items) {
     // /items/top은 standalone note/attachment도 포함할 수 있어 방어적으로 거른다.
     if (item.data.itemType === 'attachment' || item.data.itemType === 'note') continue;
 
     try {
-      const attachmentKey = await findPdfAttachment(item.key);
+      const attachment = await findReadableAttachment(item.key);
       savePaper({
         itemKey: item.key,
         itemVersion: item.version,
         title: cleanTitle(item.data.title, item.data.itemType) || '(제목 없음)',
         authors: extractAuthors(item.data.creators),
         year: extractYear(item.data.date),
-        attachmentKey,
+        attachmentKey: attachment?.key ?? null,
+        attachmentType: attachment?.type ?? null,
         collections: item.data.collections || [],
       });
       cached++;
@@ -285,6 +330,35 @@ app.get('/api/papers/:key', async (req, res) => {
   }
 });
 
+// 웹페이지 URL을 새 Zotero 아이템으로 추가한다 (itemType: webpage).
+// 저장/동기화는 그대로 Zotero가 하고, Folio는 아이템 생성 창구 하나만 연다 —
+// 생성 이후 title/author 등 서지정보 수정은 여기서 하지 않는다.
+app.post('/api/papers/webpage', async (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: '올바른 URL이 아닙니다 (http:// 또는 https://로 시작해야 해요)' });
+  }
+
+  try {
+    const pageTitle = await fetchPageTitle(url);
+    const created = await createWebpageItem({ url, title: pageTitle });
+    savePaper({
+      itemKey: created.key,
+      itemVersion: created.version,
+      title: cleanTitle(created.data.title, created.data.itemType) || '(제목 없음)',
+      authors: extractAuthors(created.data.creators),
+      year: extractYear(created.data.date),
+      attachmentKey: null,
+      attachmentType: null,
+      collections: created.data.collections || [],
+    });
+    res.status(201).json(getPaper(created.key));
+  } catch (err) {
+    console.error('[papers webpage] 생성 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 논문(Zotero 원본 아이템) 자체를 삭제한다. Zotero 휴지통으로 이동하며,
 // 자식 노트/첨부파일도 함께 딸려간다. 로컬 papers 캐시에서도 지운다.
 app.delete('/api/papers/:key', async (req, res) => {
@@ -329,7 +403,7 @@ app.put('/api/papers/:key/memo', async (req, res) => {
 
 app.get('/api/papers/:key/pdf', async (req, res) => {
   const paper = getPaper(req.params.key);
-  if (!paper?.attachmentKey) {
+  if (!paper?.attachmentKey || paper.attachmentType !== 'pdf') {
     return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
   }
   try {
@@ -341,6 +415,36 @@ app.get('/api/papers/:key/pdf', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// PDF가 없고 브라우저 커넥터가 저장한 HTML 스냅샷만 있는 아이템(예: 이 글이
+// 아니라 그냥 웹페이지) 원문 패널용 — 그대로 서빙해서 iframe에 띄운다.
+app.get('/api/papers/:key/html', async (req, res) => {
+  const paper = getPaper(req.params.key);
+  if (!paper?.attachmentKey || paper.attachmentType !== 'html') {
+    return res.status(404).json({ error: 'HTML 스냅샷이 없습니다' });
+  }
+  try {
+    const buffer = await downloadAttachmentFile(paper.attachmentKey);
+    // Zotero는 브라우저 커넥터로 저장한 스냅샷을 zip으로 묶어서 저장한다
+    // (linkMode: imported_url) — PK로 시작하면 zip이니 그 안의 html을 꺼낸다.
+    const html = buffer.slice(0, 2).toString('ascii') === 'PK' ? extractHtmlFromZip(buffer) : buffer;
+    // 스냅샷은 사용자가 Zotero로 저장해둔 신뢰 가능한 콘텐츠지만, 그래도
+    // 스크립트/외부 요청은 막고 읽기용으로만 보여준다.
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Content-Security-Policy', "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:;");
+    res.send(html);
+  } catch (err) {
+    console.error('[papers html] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function extractHtmlFromZip(buffer) {
+  const zip = new AdmZip(buffer);
+  const entry = zip.getEntries().find((e) => /\.html?$/i.test(e.entryName));
+  if (!entry) throw new Error('스냅샷 안에서 html 파일을 찾지 못했습니다');
+  return entry.getData();
+}
 
 // --- 컬렉션 ------------------------------------------------------------
 
