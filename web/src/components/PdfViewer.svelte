@@ -1,292 +1,206 @@
 <script>
-  // PDF.js 캔버스 위에 텍스트 레이어를 겹쳐 원문의 선명도는 유지하면서
-  // 텍스트 선택과 복사가 가능하도록 렌더링한다.
-  import { onMount } from 'svelte';
+  // PDF 렌더링/확대·축소/중앙 정렬/텍스트·주석 레이어는 전부 pdf.js가 자기
+  // 공식 웹 뷰어(Chrome 내장 뷰어 등도 같은 계열)에 쓰는 PDFViewer 엔진에
+  // 맡긴다 — 예전엔 캔버스를 직접 그리고 스크롤 위치로 중앙 정렬을 손수
+  // 계산했는데, 그 수식이 확대 시 비대칭하게 밀리는 등 버그가 반복돼서
+  // pdfjs-dist에 이미 포함된 검증된 엔진으로 갈아탔다.
   import '../utils/safari-polyfills.js';
   import * as pdfjsLib from 'pdfjs-dist';
+  import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
+  import 'pdfjs-dist/web/pdf_viewer.css';
   import pdfWorkerUrl from '../utils/pdf-worker-entry.js?worker&url';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-  let { src, zoom = 1, onLayoutReady } = $props();
+  // scrollContainer: 실제로 스크롤되는 요소(PdfPane.svelte의 .pdf-scroll) —
+  // PDFViewer가 스크롤 위치/가시 영역을 직접 읽고 쓰는 대상이라, 우리 것과
+  // 같은 요소를 넘겨줘야 확대 시 커서 고정 스크롤 보정(PdfPane.svelte의
+  // zoomTo)이 계속 같은 스크롤 위치 기준으로 동작한다.
+  let { src, zoom = 1, scrollContainer } = $props();
 
-  let container = $state();
+  let viewerEl = $state();
   let loading = $state(true);
   let error = $state('');
   let errorDetail = $state('');
-  let resizeToken = $state(0);
+
+  let eventBus;
+  let linkService;
+  let pdfViewer;
   let pdfDocument;
   let loadedSrc = '';
-  let renderVersion = 0;
-  // 같은 src를 한 번이라도 화면에 보여준 적 있는지. 최초 로딩만 아니면(=확대/축소나
-  // 리사이즈로 인한 재렌더링) 이미 보여준 내용을 계속 유지하다가 새 내용이 전부
-  // 준비된 뒤 한 번에 교체한다 — 매번 로딩 문구가 깜빡이거나 캔버스가 비었다
-  // 다시 그려지는 번쩍임을 없애기 위해서다.
-  let shownSrc = null;
-  let zoomTimer;
-  // 실제로 화면에 그려진(선명한) 캔버스가 어떤 배율 기준인지. 재렌더링은
-  // debounce로 미뤄지지만, 그 사이엔 이 값 대비 zoom 비율만큼 CSS로 즉시
-  // 확대 미리보기를 보여준다 — 스크롤 중에도 계속 커지는 느낌을 위해서다.
+
+  // 컨테이너 폭 기준 "페이지가 폭에 딱 맞는" 절대 배율. zoom prop(1 = 그
+  // 배율)과 곱해서 PDFViewer에 넘길 실제 절대 배율을 만든다 — PDFViewer의
+  // currentScale은 PDF 좌표계 기준 절대값이라 우리 쪽 "폭 맞춤 대비 %"
+  // 개념과 다르기 때문.
+  let fitWidthScale = $state(null);
+  // CSS로 즉시 미리보기 확대를 보여주는 배율 기준값 — 실제 재렌더(고비용)는
+  // 아래에서 debounce하고, 그 사이엔 이 값 대비 zoom 비율만큼 transform:
+  // scale로 즉시 반응하는 느낌을 준다.
   let renderedZoom = $state(1);
-  // 참고문헌 링크로 점프하기 직전의 스크롤 위치. null이면 "돌아가기" 버튼을
-  // 숨긴다. 브라우저 뒤로가기(단축키는 OS/브라우저마다 달라 안 믿을 수
-  // 있음)에 기대지 않고도 확실하게 원위치로 돌아갈 수 있게 화면에 버튼을
-  // 둔다.
+  let zoomTimer;
+
+  // 참고문헌 링크로 점프하기 직전의 스크롤 위치. null이면 되돌아갈 위치가
+  // 없다는 뜻. 화면에 떠 있는 버튼은 없고, Option(Alt)+← 단축키나 브라우저
+  // 뒤로가기로 조용히 원위치로 돌아간다.
   let jumpBackTop = $state(null);
 
-  async function getDocument(url) {
+  function jumpBack() {
+    if (jumpBackTop == null || !scrollContainer) return;
+    scrollContainer.scrollTo({ top: jumpBackTop, behavior: 'auto' });
+    jumpBackTop = null;
+  }
+
+  // 실제 점프(스크롤 이동)는 PDFLinkService가 표준 방식으로 처리하므로, 여기서는
+  // 그 직전에 "돌아갈 위치"만 옆에서 가로채 기록한다. capture 단계라 실제
+  // 링크 클릭 핸들링보다 먼저 실행된다.
+  function onLinkClickCapture(e) {
+    if (!scrollContainer) return;
+    const link = e.target.closest?.('.annotationLayer .linkAnnotation a');
+    if (!link) return;
+    history.pushState({ pdfScrollTop: scrollContainer.scrollTop }, '', location.href);
+    jumpBackTop = scrollContainer.scrollTop;
+  }
+
+  async function loadDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
     pdfDocument = await pdfjsLib.getDocument({ url }).promise;
     loadedSrc = url;
     return pdfDocument;
   }
 
-  // 목적지 배열(예: [ref, {name:'XYZ'}, left, top, zoom])에서 페이지 안에서의
-  // 정확한 y좌표(PDF 좌표계)를 뽑아낸다. 흔한 두 형태(XYZ, FitH류)만 처리하고
-  // 나머지(Fit 전체 등 y가 의미 없는 경우)는 null — 그럴 땐 페이지 맨 위로만 이동.
-  function destTopY(typeName, args) {
-    if (typeName === 'XYZ' && typeof args[1] === 'number') return args[1];
-    if ((typeName === 'FitH' || typeName === 'FitBH') && typeof args[0] === 'number') return args[0];
-    return null;
+  // 컨테이너 폭이 유효할 때만(탭 전환 등으로 숨겨져 폭이 0이면 건너뜀) "폭
+  // 맞춤" 절대 배율을 다시 잰다. PDFViewer 자신의 named-scale 계산을
+  // 그대로 활용 — 우리가 폭/여백 수식을 따로 들고 있지 않는다.
+  function measureFitWidthScale() {
+    if (!pdfViewer || !scrollContainer || scrollContainer.clientWidth === 0) return null;
+    pdfViewer.currentScaleValue = 'page-width';
+    return pdfViewer.currentScale;
   }
 
-  // 본문의 참고문헌 번호([39] 등)나 각주 클릭 시 이동(GoTo)하는 내부 링크,
-  // 그리고 외부 URL 링크를 처리하는 최소 링크 서비스. pdf.js의
-  // AnnotationLayer가 요구하는 인터페이스 중 실제로 쓰는 부분만 구현한다 —
-  // 우리는 pdf.js의 PDFViewer(전체 뷰어 프레임워크)를 쓰지 않고 페이지를
-  // 직접 그리므로, 그 프레임워크가 제공하는 PDFLinkService를 그대로 쓸 수
-  // 없다.
-  const linkService = {
-    externalLinkEnabled: true,
-    getDestinationHash: () => '#',
-    getAnchorUrl: () => '#',
-    addLinkAttributes(link, url) {
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-    },
-    async goToDestination(dest) {
-      if (!pdfDocument || !container) return;
-      const explicitDest = typeof dest === 'string' ? await pdfDocument.getDestination(dest) : await dest;
-      if (!Array.isArray(explicitDest)) return;
-
-      const [destRef, destType, ...destArgs] = explicitDest;
-      let pageIndex;
-      if (destRef && typeof destRef === 'object') {
-        pageIndex = await pdfDocument.getPageIndex(destRef);
-      } else if (Number.isInteger(destRef)) {
-        pageIndex = destRef;
-      } else {
-        return;
-      }
-
-      const pageWrap = container.querySelector(`[data-page-number="${pageIndex + 1}"]`);
-      const scrollEl = container.closest('.pdf-scroll');
-      if (!pageWrap || !scrollEl) return;
-
-      // 페이지 맨 위가 아니라, 목적지가 그 페이지 안의 어디쯤인지까지
-      // 정확히 계산한다(참고문헌 목록처럼 한 페이지에 여러 항목이 있을 때
-      // 필요한 항목이 화면 밖에 남는 걸 막기 위해).
-      const topY = destTopY(destType?.name, destArgs);
-      let offsetInPage = 0;
-      if (topY != null) {
-        const page = await pdfDocument.getPage(pageIndex + 1);
-        const scale = pageWrap.offsetWidth / page.getViewport({ scale: 1 }).width;
-        const [, y] = page.getViewport({ scale }).convertToViewportPoint(0, topY);
-        offsetInPage = Math.max(0, y - 24);
-      }
-
-      const pageRect = pageWrap.getBoundingClientRect();
-      const scrollRect = scrollEl.getBoundingClientRect();
-      const targetTop = scrollEl.scrollTop + (pageRect.top - scrollRect.top) + offsetInPage;
-
-      // 브라우저 뒤로가기로도 점프 전 위치로 돌아올 수 있도록 history에
-      // 남겨두고(URL은 안 바꿈), 화면에도 "돌아가기" 버튼을 띄운다.
-      history.pushState({ pdfScrollTop: scrollEl.scrollTop }, '', location.href);
-      jumpBackTop = scrollEl.scrollTop;
-
-      scrollEl.scrollTo({ top: targetTop, behavior: 'auto' });
-    },
-  };
-
-  function jumpBack() {
-    if (jumpBackTop == null) return;
-    container?.closest('.pdf-scroll')?.scrollTo({ top: jumpBackTop, behavior: 'auto' });
-    jumpBackTop = null;
+  function commitScale() {
+    if (fitWidthScale == null || !pdfViewer) return;
+    pdfViewer.currentScale = fitWidthScale * zoom;
+    renderedZoom = zoom;
   }
 
-  async function paintPage(entry, outputScale) {
-    const { page, viewport, pageWrap } = entry;
-
-    const canvas = document.createElement('canvas');
-    canvas.className = 'pdf-page';
-    canvas.width = Math.floor(viewport.width * outputScale);
-    canvas.height = Math.floor(viewport.height * outputScale);
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-    pageWrap.appendChild(canvas);
-
-    const textLayerElement = document.createElement('div');
-    textLayerElement.className = 'textLayer';
-    pageWrap.appendChild(textLayerElement);
-
-    const annotationLayerElement = document.createElement('div');
-    annotationLayerElement.className = 'annotationLayer';
-    pageWrap.appendChild(annotationLayerElement);
-
-    await page.render({
-      canvasContext: canvas.getContext('2d'),
-      viewport,
-      transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
-    }).promise;
-
-    const textContent = await page.getTextContent();
-    const textLayer = new pdfjsLib.TextLayer({
-      textContentSource: textContent,
-      container: textLayerElement,
-      viewport,
-    });
-    await textLayer.render();
-
-    const annotations = await page.getAnnotations({ intent: 'display' });
-    const annotationLayer = new pdfjsLib.AnnotationLayer({
-      div: annotationLayerElement,
-      page,
-      viewport: viewport.clone({ dontFlip: true }),
-      linkService,
-    });
-    await annotationLayer.render({ annotations });
-  }
-
-  async function render(url, zoomLevel) {
-    const version = ++renderVersion;
-    const isFirstShow = shownSrc !== url;
-    if (isFirstShow) loading = true;
+  async function loadAndShow(url) {
+    if (!pdfViewer) return;
+    loading = true;
     error = '';
-
     try {
-      const pdf = await getDocument(url);
-      if (version !== renderVersion) return;
-
-      const availableWidth = Math.min(container.clientWidth, 900);
-      const outputScale = Math.min(window.devicePixelRatio || 1, 2);
-
-      // 1단계: 모든 페이지의 크기를 먼저 계산해 wrap을 만들어둔다. 아직 DOM에는
-      // 붙이지 않는다 — 오래 걸리는 pdf.getPage() await 도중 새 확대/축소 요청이
-      // 들어와 이 render() 호출이 취소되면(버전 불일치), 이미 붙여놓은 조각이
-      // 다음 render()가 지워낸 컨테이너에 뒤늦게 끼어들어 레이아웃이 깨질 수
-      // 있기 때문이다.
-      const pages = [];
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        if (version !== renderVersion) return;
-
-        const unscaled = page.getViewport({ scale: 1 });
-        const scale = (availableWidth / unscaled.width) * zoomLevel;
-        const viewport = page.getViewport({ scale });
-
-        const pageWrap = document.createElement('div');
-        pageWrap.className = 'pdf-page-wrap';
-        pageWrap.dataset.pageNumber = String(pageNum);
-        pageWrap.style.width = `${viewport.width}px`;
-        pageWrap.style.height = `${viewport.height}px`;
-        pageWrap.style.setProperty('--total-scale-factor', String(viewport.scale));
-
-        pages.push({ pageNum, page, viewport, pageWrap });
-      }
-
-      if (version !== renderVersion) return;
-
-      if (isFirstShow) {
-        // 최초 로딩: 배치를 먼저 확정해 커서 앵커/전체 높이를 잡아 화면에 붙이고,
-        // 페이지는 그린 순서대로 바로바로 공개한다 — 긴 논문일수록 첫 페이지를
-        // 빨리 보여주는 게 중요하다.
-        renderedZoom = zoomLevel;
-        // Svelte의 style:transform 반응형 갱신은 비동기라, 바로 아래
-        // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
-        // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
-        container.style.transform = 'scale(1)';
-        container.replaceChildren(...pages.map((p) => p.pageWrap));
-        onLayoutReady?.();
-
-        for (const entry of pages) {
-          if (version !== renderVersion) return;
-          await paintPage(entry, outputScale);
-          if (version !== renderVersion) return;
-
-          if (entry.pageNum === 1) {
-            loading = false;
-            shownSrc = url;
-          }
-        }
-      } else {
-        // 재렌더링(확대/축소·리사이즈): 이미 화면에 뭔가 보이고 있으므로, 전부
-        // 그릴 때까지 기존 내용을 그대로 둔 채 기다렸다가 한 번에 교체한다.
-        // 중간에 빈 화면이나 로딩 문구가 끼어들며 번쩍이는 걸 막기 위해서다.
-        for (const entry of pages) {
-          await paintPage(entry, outputScale);
-          if (version !== renderVersion) return;
-        }
-        renderedZoom = zoomLevel;
-        // Svelte의 style:transform 반응형 갱신은 비동기라, 바로 아래
-        // onLayoutReady()가 가로 중앙 정렬을 계산할 때 CSS 확대값이 아직
-        // 리셋 전(scale(1) 아님)일 수 있다 — 동기적으로 먼저 맞춰둔다.
-        container.style.transform = 'scale(1)';
-        container.replaceChildren(...pages.map((p) => p.pageWrap));
-        onLayoutReady?.();
-      }
+      const doc = await loadDocument(url);
+      linkService.setDocument(doc);
+      pdfViewer.setDocument(doc);
+      // 나머지(배율 계산/loading 해제)는 pagesinit 이벤트에서 처리한다.
     } catch (err) {
-      if (version === renderVersion) {
-        error = err.message;
-        errorDetail = [
-          `${err.name || 'Error'}: ${err.message}`,
-          err.stack || '(스택 정보 없음)',
-          navigator.userAgent,
-        ].join('\n');
-        console.error('[PdfViewer]', err);
-      }
-    } finally {
-      if (version === renderVersion) loading = false;
+      error = err.message;
+      errorDetail = [
+        `${err.name || 'Error'}: ${err.message}`,
+        err.stack || '(스택 정보 없음)',
+        navigator.userAgent,
+      ].join('\n');
+      console.error('[PdfViewer]', err);
+      loading = false;
     }
   }
 
-  // 이전 값과 비교해 "배율만 바뀐 요청"을 가려내기 위한 순수 추적용 변수 —
-  // src/zoom을 반응형으로 미러링하는 게 아니라 매번 직접 갱신하므로 일부러 $state를 쓰지 않는다.
   let prevSrc;
   let prevZoom;
 
   $effect(() => {
-    resizeToken;
     const s = src;
     const z = zoom;
-    if (!container) return;
+    if (!pdfViewer) return; // 아래 초기화 effect가 아직 못 끝냈으면 여기선 아무것도 안 함
 
-    // 배율만 바뀐 경우(휠/버튼으로 연속 확대·축소)에는 재렌더링을 잠깐 미룬다.
-    // 그렇지 않으면 휠 이벤트가 들어올 때마다 매번 다시 그리면서 번쩍이게 된다.
-    // src가 바뀌었거나(새 논문) 리사이즈로 인한 요청은 즉시 반영한다.
-    const zoomOnlyChange = s === prevSrc && z !== prevZoom;
-    prevSrc = s;
-    prevZoom = z;
-
-    clearTimeout(zoomTimer);
-    if (zoomOnlyChange) {
-      zoomTimer = setTimeout(() => render(s, z), 150);
-    } else {
-      render(s, z);
+    if (s !== prevSrc) {
+      prevSrc = s;
+      prevZoom = z;
+      clearTimeout(zoomTimer);
+      loadAndShow(s);
+      return;
     }
+
+    if (z === prevZoom) return;
+    prevZoom = z;
+    // 배율만 바뀐 경우(휠/버튼 연타)엔 실제 재렌더를 잠깐 미룬다 — 매번
+    // 다시 그리면 번쩍이고 무겁다. CSS 미리보기(아래 style:transform)가
+    // 그 사이 즉시 반응하는 느낌을 대신 준다.
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(commitScale, 150);
   });
 
-  onMount(() => {
-    let timer;
-    const onResize = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => (resizeToken += 1), 180);
+  // scrollContainer는 부모(PdfPane.svelte)가 bind:this로 넘겨주는 값이라,
+  // 이 컴포넌트가 마운트되는 시점엔 아직 안 들어와 있을 수 있다(onMount에서
+  // 곧바로 확인하면 "아직 없음"으로 오판할 수 있었던 버그) — $effect로
+  // 두면 값이 나중에 들어와도 자동으로 다시 실행되니, 준비될 때까지
+  // 기다렸다가 한 번만 초기화한다.
+  let setupDone = false;
+  $effect(() => {
+    if (setupDone || !scrollContainer || !viewerEl) return;
+    setupDone = true;
+
+    eventBus = new EventBus();
+    linkService = new PDFLinkService({ eventBus, ignoreDestinationZoom: true });
+    pdfViewer = new PDFViewer({
+      container: scrollContainer,
+      viewer: viewerEl,
+      eventBus,
+      linkService,
+      removePageBorders: true,
+    });
+    linkService.setViewer(pdfViewer);
+
+    // 참고문헌/각주 링크를 클릭해도 조용히 아무 반응이 없던 버그의 원인: pdf.js의
+    // 내부 scrollIntoView 유틸은 대상 페이지 div에서 offsetParent를 타고 올라가며
+    // "실제 스크롤 컨테이너"를 자기가 알아서 찾는데, .pdfViewer에 확대 미리보기용
+    // transform이 걸려 있으면(scale(1)이어도 마찬가지 — transform 유무 자체가
+    // 기준) 그 탐색이 .pdfViewer 자신에서 멈춰버린다. .pdfViewer는 overflow:visible
+    // 이라 스크롤이 안 되는 요소라서, scrollTop을 대입해도 조용히 무시되고 실제
+    // 스크롤 컨테이너(.pdf-scroll)까지는 못 올라간다.
+    // goToDestination 안에서만 보정한다 — pdfViewer.scrollPageIntoView 자체를
+    // 덮어쓰면 확대/축소 시 pdf.js가 내부적으로 호출하는 재중심 로직까지 건드리게
+    // 되는데, 그건 PdfPane.svelte가 이미 커서 기준으로 직접 스크롤을 보정하고
+    // 있어서 손대면 오히려 그 보정과 충돌한다.
+    const _origGoToDestination = linkService.goToDestination.bind(linkService);
+    linkService.goToDestination = async (dest) => {
+      await _origGoToDestination(dest);
+      const pageDiv = pdfViewer._pages?.[pdfViewer.currentPageNumber - 1]?.div;
+      if (pageDiv && scrollContainer) {
+        const target =
+          scrollContainer.scrollTop +
+          (pageDiv.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top);
+        scrollContainer.scrollTop = Math.max(0, target);
+      }
     };
+
+    const eventAbort = new AbortController();
+    eventBus.on(
+      'pagesinit',
+      () => {
+        fitWidthScale = measureFitWidthScale();
+        commitScale();
+        loading = false;
+      },
+      { signal: eventAbort.signal }
+    );
+
+    let resizeTimer;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const nextFit = measureFitWidthScale();
+        if (nextFit == null) return; // 탭 전환 등으로 숨겨진 동안엔 아예 건너뜀
+        fitWidthScale = nextFit;
+        commitScale();
+      }, 180);
+    };
+
     // 참고문헌 링크로 점프하기 전 위치를 history state에 남겨두므로
-    // (linkService.goToDestination 참고), 뒤로가기 시 그 위치로 돌아간다.
+    // (onLinkClickCapture 참고), 뒤로가기 시 그 위치로 돌아간다.
     const onPopState = (e) => {
       if (typeof e.state?.pdfScrollTop !== 'number') return;
-      container?.closest('.pdf-scroll')?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
+      scrollContainer?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
       jumpBackTop = null;
     };
     // Option(Alt)+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌
@@ -300,41 +214,54 @@
       e.preventDefault();
       jumpBack();
     };
+
     window.addEventListener('resize', onResize);
     window.addEventListener('popstate', onPopState);
     window.addEventListener('keydown', onKeyDown);
+    scrollContainer?.addEventListener('click', onLinkClickCapture, true);
+
+    prevSrc = src;
+    prevZoom = zoom;
+    loadAndShow(src);
+
     return () => {
-      clearTimeout(timer);
+      clearTimeout(resizeTimer);
       clearTimeout(zoomTimer);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown);
-      renderVersion += 1;
+      scrollContainer?.removeEventListener('click', onLinkClickCapture, true);
+      eventAbort.abort();
     };
   });
 </script>
 
-<div class="pdf-viewer" class:is-loading={loading}>
-  {#if loading}<p class="pdf-status">PDF 페이지를 준비하는 중…</p>{/if}
-  {#if error}
-    <div class="pdf-status error">
-      <p>PDF를 불러오지 못했어요: {error}</p>
-      <details class="pdf-error-detail">
-        <summary>기술 정보 (스크린샷으로 공유해주세요)</summary>
-        <pre>{errorDetail}</pre>
-      </details>
-    </div>
-  {/if}
-  <div class="pdf-pages" bind:this={container} style:transform={`scale(${zoom / renderedZoom})`}></div>
-</div>
+{#if loading}<p class="pdf-status">PDF 페이지를 준비하는 중…</p>{/if}
+{#if error}
+  <div class="pdf-status error">
+    <p>PDF를 불러오지 못했어요: {error}</p>
+    <details class="pdf-error-detail">
+      <summary>기술 정보 (스크린샷으로 공유해주세요)</summary>
+      <pre>{errorDetail}</pre>
+    </details>
+  </div>
+{/if}
+<div class="pdfViewer" bind:this={viewerEl} style:transform={`scale(${zoom / renderedZoom})`}></div>
 
 <style>
-  .pdf-pages {
-    /* 가로/세로 앵커링은 전부 부모(PaperDetailSplit)가 scrollTop/Left를
-       직접 보정하는 방식으로 처리한다. origin이 여기서 움직이면 스케일이
-       걸린 상태에서 기준점이 바뀌어 화면이 튀므로, 항상 상단 중앙으로
-       고정해둔다. */
+  .pdfViewer {
+    /* 세로 앵커링은 부모(PdfPane.svelte)가 scrollTop을 직접 보정하는
+       방식으로 처리한다. origin이 여기서 움직이면 스케일이 걸린 상태에서
+       기준점이 바뀌어 화면이 튀므로, 항상 상단 중앙으로 고정해둔다. */
     transform-origin: 50% 0;
+  }
+
+  /* 페이지 낱장의 테두리/그림자는 pdf.js 기본값(투명 9px 보더) 대신
+     Folio 팔레트에 맞춘 우리 것으로 — removePageBorders 옵션으로 기본값은
+     꺼두고 여기서만 얇게 덧입힌다. */
+  :global(.pdfViewer .page) {
+    border-radius: 3px;
+    box-shadow: 0 4px 18px rgba(77, 47, 33, 0.15);
   }
 
   .pdf-error-detail {
