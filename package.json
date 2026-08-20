@@ -1,7 +1,7 @@
 {
-  "name": "zotero-insight",
+  "name": "folio",
   "version": "0.2.0",
-  "description": "Zotero 라이브러리 위에 개인 논문 아카이브 + 메모를 얹는 개인용 도구",
+  "description": "Folio — Zotero 라이브러리 위에 개인 논문 아카이브 + 메모를 얹는 개인용 도구",
   "type": "module",
   "main": "server/server.js",
   "scripts": {

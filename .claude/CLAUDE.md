@@ -4,7 +4,8 @@
 
 ## 프로젝트 정체성
 
-Zotero Insight는 **Zotero를 대체하는 게 아니라 보강하는 도구**입니다.
+Folio(구 프로젝트명: Zotero Insight)는 **Zotero를 대체하는 게 아니라
+보강하는 도구**입니다.
 "AI가 대신 요약해주는" 방향은 폐기했다 — 요약은 머리에 남지 않는다.
 지금은 **개인 논문 아카이브 + 메모 도구**다: Zotero 위에서 논문을
 둘러보고, 직접 메모를 쓰는 공간.
@@ -44,6 +45,11 @@ Zotero note를 "이 도구가 관리하는 메모"로 구분하기 위해 태그
 
 - 논문별 메모(child note): 태그 `zotero-insight:memo`
 - 독립 메모(standalone note): 태그 `zotero-insight:standalone-memo`
+
+(태그 prefix가 `zotero-insight`인 건 프로젝트 초기 이름의 흔적이며 의도적으로
+유지한다 — 이미 사용자 Zotero 라이브러리에 이 태그로 저장된 메모가 있으므로,
+표시 이름이 Folio로 바뀌어도 태그 문자열은 바꾸지 않는다. 바꾸면 기존 메모를
+못 찾게 된다.)
 
 저장 시 항상 "해당 태그가 붙은 note가 이미 있는지" 먼저 확인 후,
 있으면 `PATCH`(수정), 없으면 `POST`(생성)한다 — 절대 매번 새로 만들지
