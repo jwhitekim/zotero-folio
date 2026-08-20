@@ -59,6 +59,32 @@ export async function fetchChangedTopItems(sinceVersion) {
   return { items, newVersion };
 }
 
+// 마지막 동기화 버전 이후 바뀐 첨부파일들의 부모 아이템 key를 가져온다.
+// 기존 아이템에 첨부파일만 새로 붙인 경우 부모 아이템 자체의 version은
+// 바뀌지 않아 /items/top?since=만으로는 놓친다 — 이걸로 보완한다.
+export async function fetchChangedAttachmentParentKeys(sinceVersion) {
+  const parentKeys = new Set();
+  let url = `${userPrefix()}/items?since=${sinceVersion}&itemType=attachment&format=json&limit=100`;
+
+  while (url) {
+    const res = await fetch(url, { headers: headers() });
+    if (!res.ok) {
+      throw new Error(`Zotero 첨부파일 변경 조회 실패: ${res.status} ${res.statusText}`);
+    }
+
+    const page = await res.json();
+    for (const item of page) {
+      if (item.data.parentItem) parentKeys.add(item.data.parentItem);
+    }
+
+    const link = res.headers.get('Link');
+    const nextMatch = link && link.match(/<([^>]+)>;\s*rel="next"/);
+    url = nextMatch ? nextMatch[1] : null;
+  }
+
+  return [...parentKeys];
+}
+
 // 마지막 동기화 버전 이후 Zotero에서 삭제된 최상위 아이템의 key 목록을 가져온다.
 // /items/top?since=만으로는 삭제가 감지되지 않아(삭제된 아이템은 그냥 응답에서
 // 빠짐), 로컬 캐시에 유령 아이템이 남는 것을 막으려면 별도로 확인해야 한다.
@@ -92,15 +118,20 @@ export async function fetchChildren(itemKey) {
   return res.json();
 }
 
-// 자식 중 PDF 첨부파일 하나를 찾는다. 없으면 null.
-export async function findPdfAttachment(itemKey) {
+// 자식 첨부파일 중 원문 패널이 보여줄 수 있는 걸 찾는다 — PDF를 우선하고,
+// 없으면 HTML 스냅샷(브라우저 커넥터로 저장한 웹페이지)을 대신 쓴다.
+// 둘 다 없으면 null.
+export async function findReadableAttachment(itemKey) {
   const children = await fetchChildren(itemKey);
-  const attachment = children.find(
-    (child) =>
-      child.data.itemType === 'attachment' &&
-      child.data.contentType === 'application/pdf'
-  );
-  return attachment ? attachment.data.key : null;
+  const attachments = children.filter((child) => child.data.itemType === 'attachment');
+
+  const pdf = attachments.find((a) => a.data.contentType === 'application/pdf');
+  if (pdf) return { key: pdf.data.key, type: 'pdf' };
+
+  const html = attachments.find((a) => a.data.contentType === 'text/html');
+  if (html) return { key: html.data.key, type: 'html' };
+
+  return null;
 }
 
 // 자식 note 중 특정 태그가 붙은 것 하나를 찾는다 (논문별 메모용). 없으면 null.
@@ -159,6 +190,42 @@ export async function createChildNote(parentItemKey, noteHtml, tags) {
     throw new Error(`Zotero note 생성 실패: ${JSON.stringify(result.failed)}`);
   }
   return created; // {key, version, data} — updateNote/fetchItem과 동일한 형태
+}
+
+// 웹페이지를 새 Zotero 아이템(itemType: webpage)으로 만든다. Folio가 직접
+// 여는 유일한 "새 아이템 생성" 창구 — 이후 title/author 등은 Zotero(또는
+// Zotero Connector)에서 관리하는 게 원칙이고, Folio는 여기서 만든 뒤로는
+// 건드리지 않는다.
+export async function createWebpageItem({ url, title }) {
+  const body = [
+    {
+      itemType: 'webpage',
+      title: title || url,
+      url,
+      accessDate: new Date().toISOString(),
+    },
+  ];
+
+  const res = await fetch(`${userPrefix()}/items`, {
+    method: 'POST',
+    headers: {
+      ...headers(),
+      'Zotero-Write-Token': writeToken(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Zotero 웹페이지 아이템 생성 실패: ${res.status} ${res.statusText}`);
+  }
+
+  const result = await res.json();
+  const created = result.successful?.['0'];
+  if (!created) {
+    throw new Error(`Zotero 웹페이지 아이템 생성 실패: ${JSON.stringify(result.failed)}`);
+  }
+  return created; // {key, version, data}
 }
 
 // 이 도구가 만든 note를 수정한다 (부분 업데이트). 낙관적 잠금을 위해
