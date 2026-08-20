@@ -42,8 +42,8 @@
     </button>
     <div class="reader-brand"><strong>Folio</strong><span></span><em>읽기</em></div>
     {#if paper}
-      {#if paper.hasPdf}
-        <a class="reader-title" href={`/api/papers/${itemKey}/pdf`} target="_blank" rel="noopener" title="새 창에서 PDF 열기">
+      {#if paper.attachmentType}
+        <a class="reader-title" href={`/api/papers/${itemKey}/${paper.attachmentType}`} target="_blank" rel="noopener" title="새 창에서 원문 열기">
           <span class="reader-title-text">{paper.title}</span>
           <Icon name="external" size={13} />
         </a>
@@ -65,8 +65,8 @@
 
     <div class="split-view" class:note-collapsed={noteCollapsed} data-mobile-pane={mobilePane}>
       <PdfPane
-        hasPdf={paper.hasPdf}
-        pdfUrl={`/api/papers/${itemKey}/pdf`}
+        attachmentType={paper.attachmentType}
+        contentUrl={paper.attachmentType ? `/api/papers/${itemKey}/${paper.attachmentType}` : null}
         {noteCollapsed}
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
       />

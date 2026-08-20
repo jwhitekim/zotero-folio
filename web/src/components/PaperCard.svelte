@@ -31,7 +31,7 @@
         <span class="title">{paper.title}</span>
         <span class="paper-meta-row">
           <span class="sub">{paper.authors.join(', ') || '저자 미상'}{paper.year ? ` · ${paper.year}` : ''}</span>
-          {#if paper.hasPdf}<span class="tag">PDF</span>{/if}
+          {#if paper.hasPdf}<span class="tag">PDF</span>{:else if paper.attachmentType === 'html'}<span class="tag">WEB</span>{/if}
         </span>
       </span>
       <span class="chevron"><Icon name="chevron" size={18} /></span>

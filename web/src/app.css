@@ -1604,6 +1604,34 @@ a.reader-title svg {
   margin: 0.6rem 0 0;
 }
 
+/* PDF가 없고 브라우저 커넥터가 저장한 HTML 스냅샷만 있을 때 그대로
+   보여주는 iframe. 페이지 자체 스크롤은 iframe 안에서 일어난다 —
+   바깥 .pdf-scroll의 padding 안에서 카드처럼 떠 있게 둔다.
+   .html-zoom-wrap의 transform: scale()이 확대/축소를 맡는다 — PdfViewer의
+   .pdfViewer와 같은 방식(재렌더링 없이 그대로 CSS로 키움), 위쪽 중앙을
+   기준으로 확대돼야 PdfPane의 zoomTo() 스크롤 보정 계산과 맞아떨어진다.
+   너비를 패널에 맞추지 않고 일반 데스크톱 브라우저 창 폭만큼 고정폭으로
+   주는 이유 — 100%를 "패널에 맞춤"이 아니라 "브라우저에서 보던 실제
+   크기(1:1)"로 맞추기 위해서다. 원본이 패널보다 넓으면 100%에서도
+   .pdf-scroll이 가로 스크롤을 보여준다. */
+.html-zoom-wrap {
+  display: block;
+  width: 1100px;
+  max-width: none;
+  height: 100%;
+  min-height: calc(100vh - 220px);
+  transform-origin: 50% 0;
+}
+
+.html-snapshot-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
 .split-note-pane {
   overflow-y: auto;
   padding: 1.3rem 2rem 3rem;

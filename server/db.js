@@ -33,6 +33,15 @@ db.exec(`
   );
 `);
 
+// attachment_type: 'pdf' | 'html' | null — 원문 패널이 PDF 뷰어를 쓸지
+// HTML 스냅샷을 그대로 렌더링할지 구분한다. 기존 DB에는 없는 컬럼이라
+// 실패해도(이미 있으면) 조용히 넘어간다.
+try {
+  db.exec('ALTER TABLE papers ADD COLUMN attachment_type TEXT');
+} catch {
+  // 이미 컬럼이 있음 — 무시
+}
+
 // --- sync_state ---------------------------------------------------------
 
 export function getLastVersion() {
@@ -74,26 +83,28 @@ export function clearZoteroAuth() {
 // --- papers ------------------------------------------------------------
 
 const upsertPaper = db.prepare(`
-  INSERT INTO papers (item_key, item_version, title, authors, year, attachment_key, collections)
-  VALUES (@itemKey, @itemVersion, @title, @authors, @year, @attachmentKey, @collections)
+  INSERT INTO papers (item_key, item_version, title, authors, year, attachment_key, attachment_type, collections)
+  VALUES (@itemKey, @itemVersion, @title, @authors, @year, @attachmentKey, @attachmentType, @collections)
   ON CONFLICT(item_key) DO UPDATE SET
     item_version = excluded.item_version,
     title = excluded.title,
     authors = excluded.authors,
     year = excluded.year,
     attachment_key = excluded.attachment_key,
+    attachment_type = excluded.attachment_type,
     collections = excluded.collections,
     synced_at = datetime('now')
 `);
 
-export function savePaper({ itemKey, itemVersion, title, authors, year, attachmentKey, collections }) {
+export function savePaper({ itemKey, itemVersion, title, authors, year, attachmentKey, attachmentType, collections }) {
   upsertPaper.run({
     itemKey,
     itemVersion,
     title,
     authors: JSON.stringify(authors),
     year,
-    attachmentKey,
+    attachmentKey: attachmentKey ?? null,
+    attachmentType: attachmentType ?? null,
     collections: JSON.stringify(collections),
   });
 }
@@ -104,8 +115,9 @@ function rowToPaper(row) {
     title: row.title,
     authors: JSON.parse(row.authors),
     year: row.year,
-    hasPdf: !!row.attachment_key,
+    hasPdf: row.attachment_type === 'pdf',
     attachmentKey: row.attachment_key,
+    attachmentType: row.attachment_type,
     collections: JSON.parse(row.collections),
     syncedAt: row.synced_at,
   };
