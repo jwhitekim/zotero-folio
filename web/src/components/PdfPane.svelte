@@ -1,17 +1,19 @@
 <script>
-  // 논문 상세 분할 뷰의 PDF 원문 패널 — 확대/축소, 스크롤 위치 보정,
-  // 노트 패널 접기 버튼까지 PDF 보기 자체에 필요한 상태를 전부 갖고 있다.
+  // 논문 상세 분할 뷰의 원문 패널 — 확대/축소, 스크롤 위치 보정, 노트 패널
+  // 접기 버튼까지 원문 보기 자체에 필요한 상태를 전부 갖고 있다.
   import PdfViewer from './PdfViewer.svelte';
+  import HtmlViewer from './HtmlViewer.svelte';
   import Icon from './Icon.svelte';
 
   // attachmentType: 'pdf' | 'html' | null. PDF면 pdf.js 엔진(PdfViewer)으로
-  // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 그대로
-  // iframe에 띄운다 — 둘 다 없으면 빈 상태를 보여준다.
+  // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 HtmlViewer가
+  // iframe에 띄운다 — 둘 다 없으면 빈 상태를 보여준다. 두 뷰어 모두 이 zoom
+  // 상태값 하나(pdfZoom)와 zoomStep/zoomTo 계산을 공유해서, 어느 원문
+  // 타입이든 확대/축소가 똑같이 동작한다.
   let { attachmentType, contentUrl, noteCollapsed, onToggleNoteCollapse } = $props();
 
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
-  let iframeEl = $state();
 
   const MIN_ZOOM = 0.7;
   const MAX_ZOOM = 5;
@@ -46,41 +48,31 @@
   // PDF든 HTML 스냅샷이든 원문이 있으면 둘 다 확대/축소가 된다 — HTML은
   // pdf.js 같은 재렌더링이 없어서 iframe 전체를 CSS로 그대로 확대한다
   // (PdfViewer의 미리보기 확대 transform과 같은 방식).
-  // 휠 한 틱당 확대량을 deltaY 크기에 비례시킨다 — 고정폭(예: 항상 8%)이면
-  // 트랙패드 핀치의 작은 delta에 맞춰놓을 경우 마우스 휠 한 칸(delta가
-  // 훨씬 큼)이 상대적으로 너무 둔감하게 느껴진다. 최소/최대로 클램프해서
-  // 너무 찔끔거리거나 한 번에 확 튀지 않게만 막는다.
+  // 휠 한 틱당 확대량은 deltaY에 비례한다 — 브라우저 네이티브 Ctrl+휠 줌과
+  // 같은 raw delta를 쓰기 때문에, 마우스 휠의 큰 한 칸은 그만큼 크게
+  // 반응해서 체감 배율이 1:1로 맞는다. 다만 트랙패드 핀치는 deltaY가
+  // 원래 아주 작아서(한 틱에 2~5 정도) 최소값 없이 그대로 쓰면 거의
+  // 안 움직이는 것처럼 느껴진다 — 최소 반응 폭만 보장한다(상한은 없음,
+  // 큰 입력은 그대로 크게 반응).
   function zoomStep(deltaY) {
-    return Math.min(0.35, Math.max(0.04, Math.abs(deltaY) / 350));
+    return Math.max(0.04, Math.abs(deltaY) / 350);
   }
 
+  // PDF 전용 — pdf.js의 PDFViewer가 절대위치(absolute) 컨테이너를 강제해서
+  // .viewer-scroll-wrap(relative)+.viewer-scroll(absolute) 우회 구조가
+  // 필요하다(PdfViewer.svelte 주석 참고). HTML은 그 제약이 없어서
+  // HtmlViewer.svelte가 자기 스크롤 박스를 직접 갖는다 — 그래서 이
+  // 핸들러도 PDF 쪽 마크업에만 붙는다.
   function onPdfWheel(e) {
-    if (!attachmentType || !(e.ctrlKey || e.metaKey)) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const step = zoomStep(e.deltaY);
     zoomTo(pdfZoom + (e.deltaY < 0 ? step : -step), e.clientY);
   }
-
-  // iframe은 별도 문서/윈도우라 커서가 그 안에 있으면 바깥 .pdf-scroll의
-  // onwheel이 아예 안 불린다 — 브라우저 화면 전체가 확대/축소돼 버리는
-  // 이유. iframe이 로드되면 그 안쪽 window에 직접 리스너를 달아서 우리
-  // zoomTo로 넘긴다(clientY는 iframe 기준이라 바깥 좌표로 보정).
-  function attachIframeZoom() {
-    const win = iframeEl?.contentWindow;
-    win?.addEventListener('wheel', onIframeWheel, { passive: false });
-  }
-
-  function onIframeWheel(e) {
-    if (!(e.ctrlKey || e.metaKey)) return;
-    e.preventDefault();
-    const rect = iframeEl.getBoundingClientRect();
-    const step = zoomStep(e.deltaY);
-    zoomTo(pdfZoom + (e.deltaY < 0 ? step : -step), rect.top + e.clientY);
-  }
 </script>
 
 <section class="split-pdf-pane" aria-label="원문">
-  <div class="pdf-pane-toolbar">
+  <div class="viewer-toolbar">
     <div><span class="toolbar-icon"><Icon name="file" size={17} /></span><strong>원문</strong></div>
     {#if attachmentType}
       <div class="pdf-zoom-controls" aria-label="원문 확대 및 축소">
@@ -104,24 +96,15 @@
       <Icon name="panel" size={16} />
     </button>
   </div>
-  <div class="pdf-scroll-wrap">
-    <div class="pdf-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
-      {#if attachmentType === 'pdf'}
+  {#if attachmentType === 'pdf'}
+    <div class="viewer-scroll-wrap">
+      <div class="viewer-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
         <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} />
-      {:else if attachmentType === 'html'}
-        <div class="html-zoom-wrap" style:transform={`scale(${pdfZoom})`}>
-          <iframe
-            bind:this={iframeEl}
-            class="html-snapshot-frame"
-            src={contentUrl}
-            title="웹페이지 원문"
-            sandbox="allow-same-origin"
-            onload={attachIframeZoom}
-          ></iframe>
-        </div>
-      {:else}
-        <div class="pdf-empty"><Icon name="file" size={25} /><p>첨부된 원문이 없어요.</p></div>
-      {/if}
+      </div>
     </div>
-  </div>
+  {:else if attachmentType === 'html'}
+    <HtmlViewer src={contentUrl} zoom={pdfZoom} {zoomStep} onZoomTo={zoomTo} bind:scrollEl={pdfScrollEl} />
+  {:else}
+    <div class="viewer-empty"><Icon name="file" size={25} /><p>첨부된 원문이 없어요.</p></div>
+  {/if}
 </section>

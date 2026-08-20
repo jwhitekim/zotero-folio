@@ -282,7 +282,11 @@ main:not(.reading-mode):not(.login-mode) {
   display: grid;
   max-width: 650px;
   margin-top: 3rem;
-  grid-template-columns: repeat(3, 1fr);
+  /* 그냥 1fr은 minmax(auto, 1fr)로 해석돼서 트랙 최소폭이 안의 텍스트(카드
+     설명 <small>이 nowrap) 크기에 묶인다 — 좁은 뷰포트(임베디드 브라우저 등)
+     에서 3칸 합이 넘치면서 .login-story의 overflow:hidden에 잘려 보이는
+     원인이었다. minmax(0, 1fr)로 트랙이 0까지 줄어들 수 있게 한다. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -711,7 +715,10 @@ h2 {
 .home-stats {
   display: grid;
   margin-bottom: 2rem;
-  grid-template-columns: repeat(3, 1fr);
+  /* 그냥 1fr(= minmax(auto, 1fr))은 트랙 최소폭이 카드 콘텐츠 크기에 묶여서
+     좁은 뷰포트에서 3칸 합이 넘칠 수 있다 — minmax(0, 1fr)로 트랙이 0까지
+     줄어들 수 있게 한다. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.6rem;
 }
 
@@ -1420,7 +1427,7 @@ a.reader-title svg {
   grid-template-rows: 48px minmax(0, 1fr);
 }
 
-.pdf-pane-toolbar {
+.viewer-toolbar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -1429,17 +1436,17 @@ a.reader-title svg {
   background: color-mix(in srgb, var(--surface-subtle) 90%, transparent);
 }
 
-.pdf-pane-toolbar > div:first-child {
+.viewer-toolbar > div:first-child {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.pdf-pane-toolbar > :last-child {
+.viewer-toolbar > :last-child {
   justify-self: end;
 }
 
-.pdf-pane-toolbar .pdf-zoom-controls {
+.viewer-toolbar .pdf-zoom-controls {
   display: flex;
   justify-self: center;
   padding: 0.15rem;
@@ -1484,7 +1491,7 @@ a.reader-title svg {
   font-variant-numeric: tabular-nums;
 }
 
-.pdf-pane-toolbar strong {
+.viewer-toolbar strong {
   color: var(--text-soft);
   font-size: 0.74rem;
 }
@@ -1521,7 +1528,15 @@ a.reader-title svg {
   color: var(--accent);
 }
 
-.pdf-pane-toolbar a {
+/* 눌린 상태(aria-pressed)에서 배경색이 이미 꽉 차 있는데, 기본 포커스
+   링(outline-offset: 2px)이 그 바깥에 따로 떨어져서 그려지면 두 겹
+   테두리가 겹쳐 붕 뜬 배지처럼 보인다. 이 버튼만 링을 자기 모양에
+   딱 붙여서 하나의 덩어리로 보이게 한다. */
+.note-collapse-toggle:focus-visible {
+  outline-offset: 0;
+}
+
+.viewer-toolbar a {
   padding: 0.35rem 0.5rem;
   border-radius: 8px;
   color: var(--text-muted);
@@ -1531,24 +1546,24 @@ a.reader-title svg {
   transition: background 160ms ease, color 160ms ease;
 }
 
-.pdf-pane-toolbar a:hover {
+.viewer-toolbar a:hover {
   background: var(--surface);
   color: var(--accent);
 }
 
-/* .pdf-scroll을 감싸는 위치 기준 상자. .split-pdf-pane의 그리드 행(툴바 아래
-   나머지 영역)을 정상적으로 차지하는 건 이 wrap이고, .pdf-scroll 자신은
+/* .viewer-scroll을 감싸는 위치 기준 상자. .split-pdf-pane의 그리드 행(툴바 아래
+   나머지 영역)을 정상적으로 차지하는 건 이 wrap이고, .viewer-scroll 자신은
    absolute로 그 안을 꽉 채운다 — pdf.js의 PDFViewer가 컨테이너로 쓰는
    요소는 반드시 absolutely positioned이어야 한다는 제약이 있어서
    (아니면 생성자에서 바로 에러), 그리드 트랙 크기 계산은 이 wrap에 맡기고
-   .pdf-scroll은 순수하게 "그 안을 채우는 스크롤 상자" 역할만 한다. */
-.pdf-scroll-wrap {
+   .viewer-scroll은 순수하게 "그 안을 채우는 스크롤 상자" 역할만 한다. */
+.viewer-scroll-wrap {
   position: relative;
   min-width: 0;
   min-height: 0;
 }
 
-.pdf-scroll {
+.viewer-scroll {
   position: absolute;
   inset: 0;
   overflow: auto;
@@ -1581,7 +1596,7 @@ a.reader-title svg {
 }
 
 .pdf-status,
-.pdf-empty {
+.viewer-empty {
   padding: 2rem;
   color: var(--text-muted);
   font-size: 0.78rem;
@@ -1592,7 +1607,7 @@ a.reader-title svg {
   color: var(--danger);
 }
 
-.pdf-empty {
+.viewer-empty {
   display: flex;
   min-height: 240px;
   flex-direction: column;
@@ -1600,36 +1615,8 @@ a.reader-title svg {
   justify-content: center;
 }
 
-.pdf-empty p {
+.viewer-empty p {
   margin: 0.6rem 0 0;
-}
-
-/* PDF가 없고 브라우저 커넥터가 저장한 HTML 스냅샷만 있을 때 그대로
-   보여주는 iframe. 페이지 자체 스크롤은 iframe 안에서 일어난다 —
-   바깥 .pdf-scroll의 padding 안에서 카드처럼 떠 있게 둔다.
-   .html-zoom-wrap의 transform: scale()이 확대/축소를 맡는다 — PdfViewer의
-   .pdfViewer와 같은 방식(재렌더링 없이 그대로 CSS로 키움), 위쪽 중앙을
-   기준으로 확대돼야 PdfPane의 zoomTo() 스크롤 보정 계산과 맞아떨어진다.
-   너비를 패널에 맞추지 않고 일반 데스크톱 브라우저 창 폭만큼 고정폭으로
-   주는 이유 — 100%를 "패널에 맞춤"이 아니라 "브라우저에서 보던 실제
-   크기(1:1)"로 맞추기 위해서다. 원본이 패널보다 넓으면 100%에서도
-   .pdf-scroll이 가로 스크롤을 보여준다. */
-.html-zoom-wrap {
-  display: block;
-  width: 1100px;
-  max-width: none;
-  height: 100%;
-  min-height: calc(100vh - 220px);
-  transform-origin: 50% 0;
-}
-
-.html-snapshot-frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #fff;
 }
 
 .split-note-pane {
@@ -1711,7 +1698,7 @@ a.reader-title svg {
     padding: 1rem 1.25rem 3rem;
   }
 
-  .pdf-pane-toolbar > div:first-child strong {
+  .viewer-toolbar > div:first-child strong {
     font-size: 0;
     gap: 0;
   }
