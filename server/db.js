@@ -42,6 +42,22 @@ try {
   // 이미 컬럼이 있음 — 무시
 }
 
+// 이 컬럼이 생기기 전에 캐시된 논문들은 attachment_key는 있어도
+// attachment_type이 비어있다. sync는 Zotero 쪽 버전이 실제로 바뀐
+// 아이템만 다시 읽어오는 증분 방식이라, 그 아이템이 이후로도 안 바뀌면
+// attachment_type은 영영 안 채워진다(= PDF/HTML 뷰어가 계속 0건으로
+// 보이는 원인). 그런 행이 하나라도 남아있으면 lastVersion을 초기화해서
+// 다음 sync가 전체를 다시 읽어오게 만든다 — 한 번 채워지고 나면 이 조건
+// 자체가 더 이상 참이 아니라 재실행해도 안전하다.
+const staleAttachmentTypeCount = db
+  .prepare(
+    "SELECT COUNT(*) AS c FROM papers WHERE attachment_key IS NOT NULL AND attachment_key != '' AND attachment_type IS NULL"
+  )
+  .get().c;
+if (staleAttachmentTypeCount > 0) {
+  db.prepare("DELETE FROM sync_state WHERE key = 'lastVersion'").run();
+}
+
 // --- sync_state ---------------------------------------------------------
 
 export function getLastVersion() {
