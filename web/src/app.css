@@ -86,7 +86,7 @@ textarea:focus-visible {
 }
 
 #app {
-  width: min(100%, 960px);
+  width: min(100%, 1150px);
   min-height: 100vh;
   margin: 0 auto;
   position: relative;
@@ -1849,7 +1849,7 @@ a.reader-title svg {
 }
 
 /* 데스크톱 탭바는 900px 초과에서만 보인다 — 모바일의 떠 있는 캡슐 대신,
-   칼럼(#app, 최대 960px) 상단에 고정된 평평한 헤더 형태를 쓴다. */
+   칼럼(#app, 최대 1150px) 상단에 고정된 평평한 헤더 형태를 쓴다. */
 .tabbar-desktop {
   display: none;
 }
@@ -1868,7 +1868,7 @@ a.reader-title svg {
     min-height: 58px;
     align-items: center;
     justify-content: center;
-    width: min(100%, 960px);
+    width: min(100%, 1150px);
     gap: 0.3rem;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid var(--border);
