@@ -185,8 +185,12 @@
       { signal: eventAbort.signal }
     );
 
+    // 브라우저 창 크기뿐 아니라, 원문/노트 패널 사이 구분선을 드래그해서
+    // 이 컨테이너 자체의 폭이 바뀌는 경우에도 폭 맞춤을 다시 재야 한다 —
+    // 그건 window resize 이벤트로는 안 잡히므로, 컨테이너 자신의 크기를
+    // 직접 관찰한다.
     let resizeTimer;
-    const onResize = () => {
+    const resizeObserver = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         const nextFit = measureFitWidthScale();
@@ -194,7 +198,8 @@
         fitWidthScale = nextFit;
         commitScale();
       }, 180);
-    };
+    });
+    resizeObserver.observe(scrollContainer);
 
     // 참고문헌 링크로 점프하기 전 위치를 history state에 남겨두므로
     // (onLinkClickCapture 참고), 뒤로가기 시 그 위치로 돌아간다.
@@ -215,7 +220,6 @@
       jumpBack();
     };
 
-    window.addEventListener('resize', onResize);
     window.addEventListener('popstate', onPopState);
     window.addEventListener('keydown', onKeyDown);
     scrollContainer?.addEventListener('click', onLinkClickCapture, true);
@@ -227,7 +231,7 @@
     return () => {
       clearTimeout(resizeTimer);
       clearTimeout(zoomTimer);
-      window.removeEventListener('resize', onResize);
+      resizeObserver.disconnect();
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown);
       scrollContainer?.removeEventListener('click', onLinkClickCapture, true);
