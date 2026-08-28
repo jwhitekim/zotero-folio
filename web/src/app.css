@@ -1401,12 +1401,42 @@ a.reader-title svg {
   width: 100%;
   height: calc(100dvh - 64px);
   overflow: hidden;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 480px);
+  /* --split-note-width는 PaperDetailSplit.svelte가 구분선 드래그로 인라인
+     설정한다. 기본값(420px)은 노트 패널을 렌더링해본 적 없는 첫 로드
+     순간을 위한 것. */
+  grid-template-columns: minmax(0, 1fr) 6px var(--split-note-width, 420px);
   transition: grid-template-columns 200ms ease;
+}
+
+/* 드래그 도중엔 transition을 끈다 — 200ms 이징이 걸린 채로 매 pointermove마다
+   폭을 다시 지정하면 마우스보다 패널이 한 박자 늦게 따라와 뻑뻑하게 느껴진다. */
+.split-view.resizing {
+  transition: none;
 }
 
 .split-view.note-collapsed {
   grid-template-columns: minmax(0, 1fr) 0;
+}
+
+/* .split-pdf-pane과 .split-note-pane 사이의 드래그 가능한 구분선. 시각적
+   두께(6px)는 얇게 유지하고, ::before로 히트 영역만 좌우로 넓혀서 잡기
+   쉽게 한다. */
+.split-resizer {
+  position: relative;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 160ms ease;
+}
+
+.split-resizer:hover,
+.split-view.resizing .split-resizer {
+  background: var(--accent);
+}
+
+.split-resizer::before {
+  position: absolute;
+  inset: 0 -4px;
+  content: '';
 }
 
 .split-view.note-collapsed .split-note-pane {
@@ -1679,6 +1709,10 @@ a.reader-title svg {
   .split-view {
     height: calc(100dvh - 106px);
     grid-template-columns: 1fr;
+  }
+
+  .split-resizer {
+    display: none;
   }
 
   .note-collapse-toggle {

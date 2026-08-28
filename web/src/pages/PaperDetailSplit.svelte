@@ -15,6 +15,36 @@
   let mobilePane = $state('pdf');
   let noteCollapsed = $state(false);
 
+  // 원문/노트 패널 구분선 드래그로 폭 조절. splitViewEl(그리드 컨테이너)의
+  // 실제 렌더 폭을 기준으로 매 드래그마다 clamp하므로, 창 크기가 좁아져도
+  // 노트 패널이 원문 패널을 다 밀어내는 일이 없다.
+  let splitViewEl = $state();
+  let noteWidth = $state(420);
+  let resizing = $state(false);
+
+  const NOTE_WIDTH_MIN = 320;
+  const NOTE_WIDTH_MAX = 720;
+  const PDF_WIDTH_MIN = 360;
+
+  function startResize(e) {
+    e.preventDefault();
+    resizing = true;
+
+    const onMove = (ev) => {
+      if (!splitViewEl) return;
+      const rect = splitViewEl.getBoundingClientRect();
+      const maxWidth = Math.min(NOTE_WIDTH_MAX, rect.width - PDF_WIDTH_MIN);
+      noteWidth = Math.min(maxWidth, Math.max(NOTE_WIDTH_MIN, rect.right - ev.clientX));
+    };
+    const onUp = () => {
+      resizing = false;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
   async function load() {
     loading = true;
     error = '';
@@ -63,13 +93,30 @@
       <button class:active={mobilePane === 'note'} onclick={() => (mobilePane = 'note')}><Icon name="note" size={17} /> 노트</button>
     </div>
 
-    <div class="split-view" class:note-collapsed={noteCollapsed} data-mobile-pane={mobilePane}>
+    <div
+      class="split-view"
+      class:note-collapsed={noteCollapsed}
+      class:resizing
+      data-mobile-pane={mobilePane}
+      bind:this={splitViewEl}
+      style:--split-note-width={`${noteWidth}px`}
+    >
       <PdfPane
         attachmentType={paper.attachmentType}
         contentUrl={paper.attachmentType ? `/api/papers/${itemKey}/${paper.attachmentType}` : null}
         {noteCollapsed}
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
       />
+
+      {#if !noteCollapsed}
+        <div
+          class="split-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="원문/노트 패널 크기 조절"
+          onpointerdown={startResize}
+        ></div>
+      {/if}
 
       <aside class="split-note-pane" aria-label="이 논문의 노트">
         {#key itemKey}
