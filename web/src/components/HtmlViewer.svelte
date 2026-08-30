@@ -35,9 +35,14 @@
   // hidden을 걸어둔 것들이 있다(예: 티스토리 사이드바 테마). 폭 맞춤 배율로
   // 어차피 안 잘리게 축소해서 보여주지만, 혹시라도 폭 맞춤이 실패하는
   // 경우를 대비해 최소한 스크롤은 가능하게 되돌려놓는다.
+  // 세로(overflow-y)는 절대 auto로 풀면 안 된다 — iframe 높이는 항상
+  // contentHeight(측정값)로 콘텐츠 실제 높이에 맞춰지므로 내부 스크롤이
+  // 필요 없는데, onload 이후 contentHeight가 반영되기 전 짧은 구간에
+  // overflow-y까지 auto였다면 iframe 내부 스크롤바가 바깥
+  // .html-viewer-scroll 스크롤바와 동시에 뜨는 이중 스크롤 원인이 됐다.
   function unblockOverflow(doc) {
     const style = doc.createElement('style');
-    style.textContent = 'html, body { overflow: auto !important; }';
+    style.textContent = 'html, body { overflow-x: auto !important; overflow-y: hidden !important; }';
     doc.head?.appendChild(style);
   }
 
@@ -139,19 +144,25 @@
 
 <div class="html-viewer-scroll" bind:this={scrollEl} onwheel={onWheel}>
   <div
-    class="html-zoom-wrap"
-    style:width={`${contentWidth}px`}
-    style:height={`${contentHeight}px`}
-    style:transform={`scale(${fitWidthScale * zoom})`}
+    class="html-scale-sizer"
+    style:width={`${contentWidth * fitWidthScale * zoom}px`}
+    style:height={`${contentHeight * fitWidthScale * zoom}px`}
   >
-    <iframe
-      bind:this={iframeEl}
-      class="html-snapshot-frame"
-      {src}
-      title="웹페이지 원문"
-      sandbox="allow-same-origin"
-      onload={attachIframeZoom}
-    ></iframe>
+    <div
+      class="html-zoom-wrap"
+      style:width={`${contentWidth}px`}
+      style:height={`${contentHeight}px`}
+      style:transform={`scale(${fitWidthScale * zoom})`}
+    >
+      <iframe
+        bind:this={iframeEl}
+        class="html-snapshot-frame"
+        {src}
+        title="웹페이지 원문"
+        sandbox="allow-same-origin"
+        onload={attachIframeZoom}
+      ></iframe>
+    </div>
   </div>
 </div>
 
@@ -170,20 +181,29 @@
     scrollbar-width: thin;
   }
 
-  /* 페이지 자체 스크롤은 iframe 안이 아니라 바깥 .html-viewer-scroll에서
-     일어난다 — height는 항상 콘텐츠 실제 높이(contentHeight, JS로 측정)로
-     맞추고, 패널 높이보다 길면 그만큼 바깥 스크롤 박스가 넘쳐서 스크롤된다.
-     측정 전(초기 로드) 순간엔 min-height가 대신 채워준다.
-     transform-origin의 세로축(0 = 상단)은 PdfViewer의 .pdfViewer와 맞춰야
+  /* CSS transform은 시각적으로만 축소할 뿐, 부모(.html-viewer-scroll)가
+     scrollHeight를 계산할 때는 축소 전(원본) 박스 크기를 그대로 본다 —
+     그래서 .html-zoom-wrap에 transform: scale()만 걸어두면, 실제로
+     화면에 보이는 콘텐츠보다 스크롤 가능한 범위가 훨씬 커져서 끝까지
+     내렸을 때 콘텐츠 없는 빈 여백이 남는다. 이 sizer가 "화면에 실제로
+     보이는 크기"(스케일 적용 후 크기)를 자기 width/height로 선언해서
+     스크롤 범위를 정확히 맞추고, 안쪽 .html-zoom-wrap은 absolute로 빼서
+     원본(축소 전) 크기가 이 계산에 끼어들지 않게 한다. */
+  .html-scale-sizer {
+    position: relative;
+    min-height: calc(100vh - 220px);
+  }
+
+  /* transform-origin의 세로축(0 = 상단)은 PdfViewer의 .pdfViewer와 맞춰야
      PdfPane의 zoomTo() 스크롤 보정 계산(세로 오프셋만 다룸)이 맞아떨어진다 —
      다만 가로축은 PdfViewer와 달리 반드시 0(왼쪽)이어야 한다. 원본 콘텐츠
      폭(1100px 이상)이 패널 폭보다 넓을 때 50%(가운데) 기준으로 축소하면
      박스 왼쪽 절반은 padding 밑으로 숨고 오른쪽 절반만 삐져나가 버린다 —
      왼쪽을 고정점으로 축소해야 padding 안쪽에 그대로 들어맞는다. */
   .html-zoom-wrap {
-    display: block;
-    max-width: none;
-    min-height: calc(100vh - 220px);
+    position: absolute;
+    top: 0;
+    left: 0;
     transform-origin: 0 0;
   }
 
