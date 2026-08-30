@@ -167,16 +167,18 @@
 </div>
 
 <style>
-  /* PdfPane.svelte의 .viewer-scroll과 패딩/스크롤바 스타일은 맞추되,
-     absolute 포지셔닝(pdf.js 전용 제약)은 안 쓴다 — 그리드 행(툴바 아래
-     나머지)을 그냥 일반 흐름으로 채운다. */
+  /* PdfPane.svelte의 .viewer-scroll과 스크롤바 스타일은 맞추되, padding은
+     안 둔다 — 스냅샷은 페이지 여백 없이 패널을 가장자리까지 꽉 채운다. */
   .html-viewer-scroll {
     height: 100%;
-    overflow-x: hidden;
+    overflow-x: auto;
     overflow-y: auto;
     overflow-anchor: none;
+    /* 가로 스크롤이 끝에 닿으면 맥 트랙패드의 두 손가락 좌우 스와이프가
+       브라우저 뒤로/앞으로가기 제스처로 새어버린다 — PDF 쪽(.viewer-scroll,
+       app.css) contain으로 스크롤을 이 요소 안에 가둔다. */
+    overscroll-behavior-x: contain;
     scrollbar-gutter: stable;
-    padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 3rem;
     scrollbar-color: var(--border-strong) transparent;
     scrollbar-width: thin;
   }
@@ -198,8 +200,8 @@
      PdfPane의 zoomTo() 스크롤 보정 계산(세로 오프셋만 다룸)이 맞아떨어진다 —
      다만 가로축은 PdfViewer와 달리 반드시 0(왼쪽)이어야 한다. 원본 콘텐츠
      폭(1100px 이상)이 패널 폭보다 넓을 때 50%(가운데) 기준으로 축소하면
-     박스 왼쪽 절반은 padding 밑으로 숨고 오른쪽 절반만 삐져나가 버린다 —
-     왼쪽을 고정점으로 축소해야 padding 안쪽에 그대로 들어맞는다. */
+     박스 왼쪽 절반은 숨고 오른쪽 절반만 삐져나가 버린다 — 왼쪽을 고정점으로
+     축소해야 sizer 안쪽에 그대로 들어맞는다. */
   .html-zoom-wrap {
     position: absolute;
     top: 0;
