@@ -3,11 +3,11 @@ set -eu
 
 usage() {
   cat <<'EOF'
-Usage:
-  ./setup-folio-linux.sh <domain> <certificate-email>
+Usage (저장소 루트에서 실행하세요 — docker compose가 루트의 docker-compose.yml을 참조합니다):
+  ./scripts/setup-folio-linux.sh <domain> <certificate-email>
 
 Example:
-  ./setup-folio-linux.sh folio.example.com kimjunhee2483@gmail.com
+  ./scripts/setup-folio-linux.sh folio.example.com kimjunhee2483@gmail.com
 
 The application is expected to be available on 127.0.0.1:3002 (override with APP_PORT).
 Router TCP ports 80 and 443 must point to this server.
