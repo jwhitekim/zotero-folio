@@ -15,7 +15,7 @@
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
 
-  const MIN_ZOOM = 0.7;
+  const MIN_ZOOM = 0.5;
   const MAX_ZOOM = 5;
 
   // 가로 중앙 정렬은 PdfViewer.svelte 내부(pdf.js 엔진의 페이지 auto-margin)가
