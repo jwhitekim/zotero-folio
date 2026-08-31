@@ -1,10 +1,10 @@
 <script>
   // 모든 논문 상세에서 사용하는 PDF 원문 + 구조화 노트 읽기 화면.
-  // PDF 확대/스크롤 자체는 PdfPane이, 노트 편집 자체는 StructuredNote가
+  // PDF 확대/스크롤 자체는 PdfPane이, 노트 편집 자체는 MarkdownNote가
   // 각자 책임지고, 이 페이지는 논문을 불러와서 그 둘을 배치하는 일만 한다.
   import { api } from '../services/api.js';
   import PdfPane from '../components/PdfPane.svelte';
-  import StructuredNote from '../components/StructuredNote.svelte';
+  import MarkdownNote from '../components/MarkdownNote.svelte';
   import Icon from '../components/Icon.svelte';
 
   let { itemKey, onBack, backLabel = '라이브러리' } = $props();
@@ -57,8 +57,8 @@
     }
   }
 
-  function saveMemo(sections) {
-    return api.saveMemo(itemKey, sections);
+  function saveMemo(markdown) {
+    return api.saveMemo(itemKey, markdown);
   }
 
   load();
@@ -120,7 +120,12 @@
 
       <aside class="split-note-pane" aria-label="이 논문의 노트">
         {#key itemKey}
-          <StructuredNote initialSections={paper.memo?.sections ?? []} onSave={saveMemo} draftKey={itemKey} />
+          <MarkdownNote
+            initialMarkdown={paper.memo?.markdown ?? ''}
+            onSave={saveMemo}
+            draftKey={itemKey}
+            paperTitle={paper.title}
+          />
         {/key}
       </aside>
     </div>

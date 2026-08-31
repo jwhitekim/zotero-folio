@@ -23,8 +23,8 @@ export const api = {
   getPaper: (key) => request(`/api/papers/${key}`),
   deletePaper: (key) => request(`/api/papers/${key}`, { method: 'DELETE' }),
   addWebpage: (url) => request('/api/papers/webpage', { method: 'POST', ...jsonBody({ url }) }),
-  saveMemo: (key, sections) =>
-    request(`/api/papers/${key}/memo`, { method: 'PUT', ...jsonBody({ sections }) }),
+  saveMemo: (key, markdown) =>
+    request(`/api/papers/${key}/memo`, { method: 'PUT', ...jsonBody({ markdown }) }),
 
   listCollections: () => request('/api/collections'),
   listCollectionPapers: (key) => request(`/api/collections/${key}/papers`),

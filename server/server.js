@@ -8,6 +8,8 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
+import { marked } from 'marked';
+import TurndownService from 'turndown';
 
 import {
   getLastVersion,
@@ -93,77 +95,23 @@ async function fetchPageTitle(url) {
   }
 }
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 메모는 마크다운으로 편집하되, Zotero note에는 HTML로 저장한다 — Zotero
+// 자체 노트 뷰어로 봤을 때도 정상 렌더되게 하기 위함. 저장 시 마크다운→HTML,
+// 불러올 때 HTML→마크다운으로 왕복 변환한다. 변환은 순수 서식 변환일 뿐,
+// 내용을 만들어내는 것은 없다.
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+});
+
+function markdownToNoteHtml(markdown) {
+  return marked.parse(markdown || '', { async: false }).trim();
 }
 
-// 자유 서술형 텍스트를 Zotero note용 HTML 문단으로 변환 (줄바꿈 기준 분리).
-function paragraphsToHtml(text) {
-  const paragraphs = (text || '').split(/\n{2,}/).filter((p) => p.trim());
-  if (paragraphs.length === 0) return '<p></p>';
-  return paragraphs.map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('\n');
-}
-
-// Zotero note HTML 조각을 화면에 보여줄 평문으로 되돌린다 (역변환).
-function noteHtmlToText(html) {
+function noteHtmlToMarkdown(html) {
   if (!html) return '';
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<\/?p>/gi, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .trim();
-}
-
-// 단어장 항목(word/meaning 쌍 목록) ↔ HTML <ul> 리스트.
-function vocabToHtml(words) {
-  const rows = (words || [])
-    .map(
-      ({ word, meaning }) =>
-        `<li><strong>${escapeHtml(word || '')}</strong>: ${escapeHtml(meaning || '')}</li>`
-    )
-    .join('\n');
-  return `<ul>\n${rows}\n</ul>`;
-}
-
-function htmlToVocab(html) {
-  const items = [...html.matchAll(/<li>\s*<strong>([\s\S]*?)<\/strong>:\s*([\s\S]*?)<\/li>/g)];
-  return items.map(([, word, meaning]) => ({
-    word: noteHtmlToText(word).trim(),
-    meaning: noteHtmlToText(meaning).trim(),
-  }));
-}
-
-// 항목(section) 배열 ↔ Zotero note HTML. 항목 제목/내용은 전부 사용자가
-// 직접 입력한 것 — 여기서 하는 일은 순수 서식 변환뿐, 생성하는 것 없음.
-// type이 'vocab'이면 단어/뜻 목록을, 그 외(기본 'text')는 기존처럼 자유
-// 텍스트 문단을 직렬화한다.
-function sectionsToNoteHtml(sections) {
-  return sections
-    .map(({ type, title, content, words }) => {
-      const body = type === 'vocab' ? vocabToHtml(words) : paragraphsToHtml(content);
-      return `<h3>${escapeHtml(title || '제목 없음')}</h3>\n${body}`;
-    })
-    .join('\n');
-}
-
-function noteHtmlToSections(html) {
-  if (!html) return [];
-  const matches = [...html.matchAll(/<h3>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3>|$)/g)];
-  if (matches.length === 0) {
-    // 예전 형식(제목 없는 통짜 텍스트) 호환 — "메모" 항목 하나로 보여줌
-    const text = noteHtmlToText(html);
-    return text ? [{ type: 'text', title: '메모', content: text }] : [];
-  }
-  return matches.map(([, title, body]) => {
-    const trimmedBody = body.trim();
-    if (/^<ul/i.test(trimmedBody)) {
-      return { type: 'vocab', title: noteHtmlToText(title).trim(), words: htmlToVocab(trimmedBody) };
-    }
-    return { type: 'text', title: noteHtmlToText(title).trim(), content: noteHtmlToText(body) };
-  });
+  return turndown.turndown(html).trim();
 }
 
 // --- sync ------------------------------------------------------------------
@@ -320,7 +268,7 @@ app.get('/api/papers/:key', async (req, res) => {
         ? {
             noteKey: memoNote.key,
             version: memoNote.version,
-            sections: noteHtmlToSections(memoNote.data.note),
+            markdown: noteHtmlToMarkdown(memoNote.data.note),
           }
         : null,
     });
@@ -376,21 +324,21 @@ app.delete('/api/papers/:key', async (req, res) => {
 });
 
 app.put('/api/papers/:key/memo', async (req, res) => {
-  const { sections } = req.body;
-  if (!Array.isArray(sections)) {
-    return res.status(400).json({ error: 'sections(배열)가 필요합니다' });
+  const { markdown } = req.body;
+  if (typeof markdown !== 'string') {
+    return res.status(400).json({ error: 'markdown(문자열)이 필요합니다' });
   }
 
   try {
     const existing = await findChildNoteByTag(req.params.key, MEMO_TAG);
 
-    if (sections.length === 0) {
-      // 항목을 전부 지우고 저장하면 빈 note를 남기지 않고 아예 삭제한다.
+    if (markdown.trim() === '') {
+      // 내용을 전부 지우고 저장하면 빈 note를 남기지 않고 아예 삭제한다.
       if (existing) await deleteItem(existing.key, existing.version);
       return res.json({ noteKey: null });
     }
 
-    const html = sectionsToNoteHtml(sections);
+    const html = markdownToNoteHtml(markdown);
     const saved = existing
       ? await updateNote(existing.key, existing.version, html)
       : await createChildNote(req.params.key, html, [MEMO_TAG]);

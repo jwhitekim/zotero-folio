@@ -1738,8 +1738,8 @@ a.reader-title svg {
   }
 }
 
-/* StructuredNote 컴포넌트 자체 마크업(노트 항목/단어장 입력 폼 등)의 스타일은
-   web/src/components/StructuredNote.svelte의 <style>로 옮겨졌다 — 컴포넌트가
+/* MarkdownNote 컴포넌트 자체 마크업(마크다운 에디터/툴바)의 스타일은
+   web/src/components/MarkdownNote.svelte의 <style>로 옮겨졌다 — 컴포넌트가
    자기 모양을 스스로 책임지도록. 이 페이지 저 페이지 전역으로 여러 컴포넌트가
    공유하는 유틸리티 클래스만 아래에 남긴다. */
 
