@@ -40,8 +40,14 @@
   let renderedZoom = $state(1);
   let zoomTimer;
 
+  // 맥 여부. Option+← 커스텀 단축키를 맥에서만 등록할지 결정하는 데 쓴다
+  // (Windows/Linux의 Alt+←는 브라우저 네이티브 뒤로가기라 충돌하므로 등록 안 함).
+  // userAgentData.platform이 있으면 그걸, 없으면 deprecated지만 널리 되는
+  // navigator.platform을 쓴다.
+  const isMac = /Mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '');
+
   // 참고문헌 링크로 점프하기 직전의 스크롤 위치. null이면 되돌아갈 위치가
-  // 없다는 뜻. 화면에 떠 있는 버튼은 없고, Option(Alt)+← 단축키나 브라우저
+  // 없다는 뜻. 화면에 떠 있는 버튼은 없고, Option(Alt)+← 단축키(맥)나 브라우저
   // 뒤로가기로 조용히 원위치로 돌아간다.
   let jumpBackTop = $state(null);
 
@@ -58,7 +64,18 @@
     if (!scrollContainer) return;
     const link = e.target.closest?.('.annotationLayer .linkAnnotation a');
     if (!link) return;
-    history.pushState({ pdfScrollTop: scrollContainer.scrollTop }, '', location.href);
+    // "돌아갈 위치"는 지금 보고 있는(=점프 직전) 히스토리 엔트리에 저장해야
+    // 네이티브 뒤로가기 시 popstate가 그 값을 그대로 돌려준다. pushState만
+    // 하면 스크롤 값이 "앞으로 갈 새 엔트리"에 들어가 버려서, 뒤로가기 때는
+    // 이전 엔트리의(값 없는) state가 와 복원이 안 됐다(off-by-one). 그래서
+    // 현재 엔트리에 replaceState로 먼저 심고, 점프한 뷰용으로 빈 엔트리를
+    // 새로 push한다.
+    history.replaceState(
+      { ...history.state, pdfScrollTop: scrollContainer.scrollTop },
+      '',
+      location.href
+    );
+    history.pushState({}, '', location.href);
     jumpBackTop = scrollContainer.scrollTop;
   }
 
@@ -221,7 +238,12 @@
     };
 
     window.addEventListener('popstate', onPopState);
-    window.addEventListener('keydown', onKeyDown);
+    // 맥에서 Option+←는 브라우저 예약 단축키가 아니라 위 커스텀 점프백에 쓸 수
+    // 있지만, Windows/Linux에서 Alt+←는 브라우저 네이티브 "뒤로가기"라 충돌한다
+    // (preventDefault로도 온전히 안 막히고, 막히면 오히려 네이티브 뒤로가기 +
+    // popstate 복원 경로가 이중으로 꼬인다). 그래서 맥에서만 커스텀 단축키를
+    // 등록하고, 그 외 플랫폼은 네이티브 뒤로가기 + 위 popstate 복원에 맡긴다.
+    if (isMac) window.addEventListener('keydown', onKeyDown);
     scrollContainer?.addEventListener('click', onLinkClickCapture, true);
 
     prevSrc = src;
