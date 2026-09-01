@@ -1,8 +1,9 @@
 <script>
   import Icon from './Icon.svelte';
+  import LogoutButton from './LogoutButton.svelte';
   import { onMount } from 'svelte';
 
-  let { tab, onSelectTab, onSearch } = $props();
+  let { tab, username = '', onSelectTab, onSearch } = $props();
 
   const tabs = [
     { id: 'home', label: '홈', icon: 'home' },
@@ -48,31 +49,45 @@
   });
 </script>
 
-<!-- 데스크톱: 칼럼(#app, 최대 760px) 상단에 고정된 평평한 탭바. 화면이 넓어서
-     떠 있는 캡슐 대신 늘 보이는 일반 헤더 형태가 자연스럽고, 검색도 라벨을
-     가릴 이유가 없어 다른 탭과 동일하게 보여준다. -->
-<nav class="tabbar-desktop" aria-label="주요 메뉴">
-  {#each tabs as t (t.id)}
-    <button
-      class="tab-btn-desktop"
-      class:active={tab === t.id}
-      onclick={() => onSelectTab(t.id)}
-      aria-current={tab === t.id ? 'page' : undefined}
-    >
-      <Icon name={t.icon} size={17} />
-      <span>{t.label}</span>
-    </button>
-  {/each}
-  <button
-    class="tab-btn-desktop"
-    class:active={tab === 'search'}
-    onclick={onSearch}
-    aria-current={tab === 'search' ? 'page' : undefined}
-  >
+<aside class="library-sidebar">
+  <div class="sidebar-brand">
+    <span class="sidebar-brand-mark"><Icon name="library" size={22} strokeWidth={1.65} /></span>
+    <span><strong>Folio</strong><small>Research library</small></span>
+  </div>
+
+  <button class="sidebar-search" class:active={tab === 'search'} onclick={onSearch}>
     <Icon name="search" size={17} />
-    <span>검색</span>
+    <span>서재에서 검색</span>
+    <kbd>⌘ K</kbd>
   </button>
-</nav>
+
+  <nav class="tabbar-desktop" aria-label="주요 메뉴">
+    <p>MY LIBRARY</p>
+    {#each tabs as t (t.id)}
+      <button
+        class="tab-btn-desktop"
+        class:active={tab === t.id}
+        onclick={() => onSelectTab(t.id)}
+        aria-current={tab === t.id ? 'page' : undefined}
+      >
+        <Icon name={t.icon} size={18} />
+        <span>{t.label}</span>
+        {#if tab === t.id}<i></i>{/if}
+      </button>
+    {/each}
+  </nav>
+
+  <div class="sidebar-quote">
+    <Icon name="spark" size={16} />
+    <p>읽고, 생각하고,<br />내 언어로 남기세요.</p>
+  </div>
+
+  <div class="sidebar-account">
+    <span class="account-avatar">{(username || 'F').slice(0, 1).toUpperCase()}</span>
+    <span class="account-copy"><strong>{username || '내 서재'}</strong><small>Zotero 연결됨</small></span>
+    <LogoutButton compact />
+  </div>
+</aside>
 
 <!-- 모바일: 엄지로 닿기 쉬운 하단에 떠 있는 캡슐 + 원형 검색 버튼. -->
 <div class="tabbar-row">

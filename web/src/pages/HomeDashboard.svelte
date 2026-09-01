@@ -1,12 +1,12 @@
 <script>
   import { api } from '../services/api.js';
   import Icon from '../components/Icon.svelte';
-  import LogoutButton from '../components/LogoutButton.svelte';
   import PaperCard from '../components/PaperCard.svelte';
 
-  let { onOpenPaper, username = '' } = $props();
+  let { onOpenPaper, onOpenLibrary, onOpenCollections, username = '' } = $props();
 
   let papers = $state([]);
+  let collections = $state([]);
   let loading = $state(true);
   let error = $state('');
   let syncing = $state(false);
@@ -16,7 +16,7 @@
     loading = true;
     error = '';
     try {
-      papers = await api.listPapers('');
+      [papers, collections] = await Promise.all([api.listPapers(''), api.listCollections()]);
     } catch (err) {
       error = err.message;
     } finally {
@@ -46,18 +46,23 @@
   load();
 </script>
 
-<header class="page-header home-header">
-  <div>
-    <p class="eyebrow">FOLIO / HOME</p>
+<header class="library-hero">
+  <div class="library-hero-copy">
+    <p class="eyebrow">PRIVATE RESEARCH LIBRARY</p>
     <h1>{username ? `${username}님의 서재` : '나의 서재'}</h1>
-    <p class="page-description">읽고, 생각하고, 내 언어로 남겨보세요.</p>
+    <p>읽어야 할 자료와 기록한 생각이 한곳에 머무는<br class="desktop-break" /> 조용한 연구 공간입니다.</p>
+    <div class="hero-actions">
+      <button class="hero-primary" onclick={onOpenLibrary}><Icon name="library" size={17} /> 라이브러리 둘러보기</button>
+      <button class="hero-secondary" onclick={runSync} disabled={syncing}>
+        <span class:spinning={syncing}><Icon name="refresh" size={17} /></span>
+        {syncing ? '동기화 중' : 'Zotero 동기화'}
+      </button>
+    </div>
   </div>
-  <div class="home-actions">
-    <LogoutButton compact />
-    <button class="icon-action" onclick={runSync} disabled={syncing} aria-label="Zotero 동기화">
-      <span class:spinning={syncing}><Icon name="refresh" size={19} /></span>
-      <span>{syncing ? '동기화 중' : '동기화'}</span>
-    </button>
+  <div class="hero-book-stack" aria-hidden="true">
+    <span class="hero-book book-one"><i>FOLIO</i><b>Research<br />Archive</b></span>
+    <span class="hero-book book-two"><i>NOTES</i><b>Ideas &amp;<br />Fragments</b></span>
+    <span class="hero-book book-three"><i>PAPERS</i><b>Selected<br />Readings</b></span>
   </div>
 </header>
 
@@ -71,18 +76,38 @@
   <div class="state-card error-state"><Icon name="alert" size={25} /><strong>라이브러리를 불러오지 못했어요</strong><p>{error}</p></div>
 {:else}
   <div class="home-stats">
-    <div class="stat-card"><span>전체 논문</span><strong>{papers.length}</strong><small>편</small></div>
-    <div class="stat-card"><span>PDF 보관</span><strong>{papers.filter((paper) => paper.hasPdf).length}</strong><small>편</small></div>
-    <div class="stat-card accent-stat"><span>최근 추가</span><strong>{papers.length ? '최근' : '—'}</strong><small>{papers.length ? '업데이트됨' : '아직 없음'}</small></div>
+    <div class="stat-card"><span><Icon name="library" size={17} /> 전체 자료</span><p><strong>{papers.length}</strong><small>편</small></p></div>
+    <div class="stat-card"><span><Icon name="file" size={17} /> 원문 보관</span><p><strong>{papers.filter((paper) => paper.hasPdf).length}</strong><small>PDF</small></p></div>
+    <div class="stat-card"><span><Icon name="folder" size={17} /> 컬렉션</span><p><strong>{collections.length}</strong><small>개의 선반</small></p></div>
   </div>
 
-  <div class="content-heading home-section-heading"><h2>최근 논문</h2><span>{Math.min(papers.length, 5)}편</span></div>
+  <div class="section-heading home-section-heading">
+    <div><p class="eyebrow">RECENTLY ADDED</p><h2>최근 들어온 책</h2></div>
+    <button onclick={onOpenLibrary}>전체 보기 <Icon name="chevron" size={15} /></button>
+  </div>
   {#if papers.length === 0}
     <div class="state-card"><span class="state-icon"><Icon name="library" size={27} /></span><strong>라이브러리가 비어 있어요</strong><p>Zotero와 동기화하면 최근 논문이 여기에 표시됩니다.</p></div>
   {:else}
-    <div class="paper-list">
+    <div class="book-shelf">
       {#each papers.slice(0, 5) as p (p.itemKey)}
-        <PaperCard paper={p} onOpen={onOpenPaper} onDelete={deletePaper} />
+        <PaperCard paper={p} onOpen={onOpenPaper} onDelete={deletePaper} variant="cover" />
+      {/each}
+    </div>
+  {/if}
+
+  {#if collections.length > 0}
+    <div class="section-heading collection-preview-heading">
+      <div><p class="eyebrow">YOUR SHELVES</p><h2>컬렉션</h2></div>
+      <button onclick={onOpenCollections}>모두 보기 <Icon name="chevron" size={15} /></button>
+    </div>
+    <div class="home-collection-grid">
+      {#each collections.slice(0, 4) as collection, index (collection.key)}
+        <button class="home-collection-card" onclick={onOpenCollections}>
+          <span class="collection-index">{String(index + 1).padStart(2, '0')}</span>
+          <span class="home-folder-icon"><Icon name="folder" size={22} /></span>
+          <span><strong>{collection.name}</strong><small>Zotero 컬렉션</small></span>
+          <Icon name="chevron" size={17} />
+        </button>
       {/each}
     </div>
   {/if}
