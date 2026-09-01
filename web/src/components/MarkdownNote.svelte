@@ -326,8 +326,8 @@
     /* 16px(1rem) 미만이면 iOS Safari가 포커스 시 화면을 확대해버린다 — 그 문턱 값. */
     font-size: 0.9rem;
     line-height: 1.85;
-    /* 마크다운 원문 편집이라 고정폭 글꼴이 문법 정렬에 유리하다. */
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* 본문과 통일된 가독성을 위해 기본 UI 글꼴(Pretendard)을 사용한다. */
+    font-family: inherit;
     tab-size: 2;
     white-space: pre-wrap;
     word-break: break-word;
