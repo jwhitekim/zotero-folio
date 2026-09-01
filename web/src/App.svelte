@@ -46,8 +46,18 @@
 
   onMount(() => {
     const onPopState = () => (currentPath = window.location.pathname);
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        if (authConnected && !detailKey && !showLoginRoute) openSearch();
+      }
+    };
     window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   });
 
   function selectTab(t) {
@@ -69,40 +79,52 @@
   }
 </script>
 
-<main
-  class:reading-mode={Boolean(detailKey) && !showLoginRoute}
-  class:login-mode={!authConnected || showLoginRoute}
+<div
+  class="app-frame"
+  class:library-frame={authConnected && !detailKey && !showLoginRoute}
+  class:reader-frame={Boolean(detailKey) && !showLoginRoute}
+  class:login-frame={!authConnected || showLoginRoute}
 >
-  {#if !authChecked}
-    <div class="auth-loading" aria-label="로그인 상태 확인 중">
-      <span class="folio-loading-mark">F</span>
-      <strong>Folio</strong>
-      <i></i>
-    </div>
-  {:else if showLoginRoute || !authConnected}
-    <LoginPage error={authError} onRetry={checkAuth} connected={authConnected} username={authUsername} />
-  {:else if detailKey}
-    <PaperDetailSplit
-      itemKey={detailKey}
-      onBack={closeDetail}
-      backLabel={tab === 'search' ? '검색 결과' : tab === 'collections' ? '컬렉션' : '라이브러리'}
-    />
-  {:else if tab === 'home'}
-    <HomeDashboard onOpenPaper={openPaper} username={authUsername} />
-  {:else if tab === 'papers'}
-    <PapersList onOpenPaper={openPaper} />
-  {:else if tab === 'collections'}
-    <Collections onOpenPaper={openPaper} />
-  {:else if tab === 'search'}
-    <SearchPapers
-      onOpenPaper={openPaper}
-      bind:query={searchQuery}
-      bind:papers={searchResults}
-      bind:hasSearched={searchHasSearched}
-    />
+  {#if authConnected && !detailKey && !showLoginRoute}
+    <TabBar {tab} username={authUsername} onSelectTab={selectTab} onSearch={openSearch} />
   {/if}
-</main>
 
-{#if authConnected && !detailKey && !showLoginRoute}
-  <TabBar {tab} onSelectTab={selectTab} onSearch={openSearch} />
-{/if}
+  <main
+    class:reading-mode={Boolean(detailKey) && !showLoginRoute}
+    class:login-mode={!authConnected || showLoginRoute}
+  >
+    {#if !authChecked}
+      <div class="auth-loading" aria-label="로그인 상태 확인 중">
+        <span class="folio-loading-mark">F</span>
+        <strong>Folio</strong>
+        <i></i>
+      </div>
+    {:else if showLoginRoute || !authConnected}
+      <LoginPage error={authError} onRetry={checkAuth} connected={authConnected} username={authUsername} />
+    {:else if detailKey}
+      <PaperDetailSplit
+        itemKey={detailKey}
+        onBack={closeDetail}
+        backLabel={tab === 'search' ? '검색 결과' : tab === 'collections' ? '컬렉션' : '라이브러리'}
+      />
+    {:else if tab === 'home'}
+      <HomeDashboard
+        onOpenPaper={openPaper}
+        onOpenLibrary={() => selectTab('papers')}
+        onOpenCollections={() => selectTab('collections')}
+        username={authUsername}
+      />
+    {:else if tab === 'papers'}
+      <PapersList onOpenPaper={openPaper} />
+    {:else if tab === 'collections'}
+      <Collections onOpenPaper={openPaper} />
+    {:else if tab === 'search'}
+      <SearchPapers
+        onOpenPaper={openPaper}
+        bind:query={searchQuery}
+        bind:papers={searchResults}
+        bind:hasSearched={searchHasSearched}
+      />
+    {/if}
+  </main>
+</div>

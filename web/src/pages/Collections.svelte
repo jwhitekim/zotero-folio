@@ -45,7 +45,7 @@
 
 {#if selected}
   <button class="back-btn" onclick={() => (selected = null)}><Icon name="arrow-left" size={18} /> 컬렉션 목록</button>
-  <header class="detail-heading collection-heading">
+  <header class="detail-heading collection-heading collection-detail-hero">
     <span class="collection-hero-icon"><Icon name="folder" size={28} /></span>
     <div><p class="eyebrow">COLLECTION</p><h1>{selected.name}</h1></div>
   </header>
@@ -63,7 +63,7 @@
   {/if}
 {:else}
   <header class="page-header compact">
-    <div><p class="eyebrow">ORGANIZE</p><h1>컬렉션</h1><p class="page-description">주제별로 정리한 논문을 빠르게 찾아보세요.</p></div>
+    <div><p class="eyebrow">YOUR SHELVES</p><h1>컬렉션</h1><p class="page-description">주제와 프로젝트별로 정리된 나만의 선반입니다.</p></div>
   </header>
   {#if loading}
     <div class="skeleton-list"><div class="skeleton-card"><i></i><span></span></div><div class="skeleton-card"><i></i><span></span></div></div>
@@ -72,12 +72,13 @@
   {:else if collections.length === 0}
     <div class="state-card"><span class="state-icon"><Icon name="folder" size={27} /></span><strong>컬렉션이 없어요</strong><p>Zotero에서 컬렉션을 만들면 이곳에 표시됩니다.</p></div>
   {:else}
-    <div class="content-heading"><h2>모든 컬렉션</h2><span>{collections.length}개</span></div>
+    <div class="content-heading"><h2>모든 선반</h2><span>{collections.length}개</span></div>
     <div class="collection-grid">
-      {#each collections as c (c.key)}
+      {#each collections as c, index (c.key)}
         <button class="collection-card" onclick={() => selectCollection(c)}>
+          <span class="collection-number">{String(index + 1).padStart(2, '0')}</span>
           <span class="folder-icon"><Icon name="folder" size={23} /></span>
-          <span class="title">{c.name}</span>
+          <span class="collection-copy"><span class="title">{c.name}</span><small>Zotero collection</small></span>
           <span class="chevron"><Icon name="chevron" size={18} /></span>
         </button>
       {/each}
