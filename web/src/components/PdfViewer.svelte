@@ -182,13 +182,35 @@
     const _origGoToDestination = linkService.goToDestination.bind(linkService);
     linkService.goToDestination = async (dest) => {
       await _origGoToDestination(dest);
-      const pageDiv = pdfViewer._pages?.[pdfViewer.currentPageNumber - 1]?.div;
-      if (pageDiv && scrollContainer) {
-        const target =
-          scrollContainer.scrollTop +
-          (pageDiv.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top);
-        scrollContainer.scrollTop = Math.max(0, target);
+      const pageView = pdfViewer._pages?.[pdfViewer.currentPageNumber - 1];
+      const pageDiv = pageView?.div;
+      if (!pageDiv || !scrollContainer) return;
+
+      // 페이지 최상단이 아니라 "목적지 지점 자체"가 화면 맨 위에 오도록,
+      // 페이지 안에서 목적지의 세로 위치(destTop, 페이지 상단 기준 CSS px)를
+      // 구해서 더한다 — 참고문헌이 페이지 중간/아래쪽에 있으면 페이지
+      // 최상단만 맞춰서는 그 위치가 화면 밖에 걸친다. pdf.js의
+      // scrollPageIntoView가 XYZ 목적지에 내부적으로 쓰는 것과 동일한 좌표
+      // 변환(pageView.viewport.convertToViewportPoint)을 그대로 가져다 쓴다 —
+      // XYZ가 아니거나(Fit 계열) y값이 없거나 계산이 실패하면 기존과 같이
+      // destTop=0(페이지 최상단)으로 안전하게 폴백한다.
+      let destTop = 0;
+      try {
+        const explicitDest = Array.isArray(dest) ? dest : await pdfDocument?.getDestination(dest);
+        const y = explicitDest?.[3];
+        if (explicitDest?.[1]?.name === 'XYZ' && y != null && pageView.viewport) {
+          const [, viewportY] = pageView.viewport.convertToViewportPoint(explicitDest[2] ?? 0, y);
+          destTop = Math.max(0, viewportY);
+        }
+      } catch {
+        destTop = 0;
       }
+
+      const target =
+        scrollContainer.scrollTop +
+        (pageDiv.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top) +
+        destTop;
+      scrollContainer.scrollTop = Math.max(0, target);
     };
 
     const eventAbort = new AbortController();
