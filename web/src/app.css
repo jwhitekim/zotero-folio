@@ -1656,12 +1656,14 @@ a.reader-title svg {
   margin: 0.6rem 0 0;
 }
 
+/* 노트 패널은 안의 MarkdownNote가 고정 헤더 + 스크롤 본문 2단으로 자기 폭을
+   꽉 채우도록, 여기서는 세로 플렉스 컨테이너 역할만 한다 — 스크롤/패딩은
+   컴포넌트(note-body)가 소유한다(원문 패널이 툴바/본문을 나눠 갖는 것과 대응). */
 .split-note-pane {
-  overflow-y: auto;
-  padding: 1.3rem 2rem 3rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--surface);
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-width: thin;
 }
 
 @media (max-width: 900px) {
@@ -1733,10 +1735,6 @@ a.reader-title svg {
 
   .split-pdf-pane {
     border-right: 0;
-  }
-
-  .split-note-pane {
-    padding: 1rem 1.25rem 3rem;
   }
 
   .viewer-toolbar > div:first-child strong {
