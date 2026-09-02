@@ -40,14 +40,8 @@
   let renderedZoom = $state(1);
   let zoomTimer;
 
-  // 맥 여부. Option+← 커스텀 단축키를 맥에서만 등록할지 결정하는 데 쓴다
-  // (Windows/Linux의 Alt+←는 브라우저 네이티브 뒤로가기라 충돌하므로 등록 안 함).
-  // userAgentData.platform이 있으면 그걸, 없으면 deprecated지만 널리 되는
-  // navigator.platform을 쓴다.
-  const isMac = /Mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '');
-
   // 참고문헌 링크로 점프하기 직전의 스크롤 위치. null이면 되돌아갈 위치가
-  // 없다는 뜻. 화면에 떠 있는 버튼은 없고, Option(Alt)+← 단축키(맥)나 브라우저
+  // 없다는 뜻. 화면에 떠 있는 버튼은 없고, Alt+← 단축키나 브라우저
   // 뒤로가기로 조용히 원위치로 돌아간다.
   let jumpBackTop = $state(null);
 
@@ -247,25 +241,36 @@
       scrollContainer?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
       jumpBackTop = null;
     };
-    // Option(Alt)+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌
-    // 점프 전 위치로 돌아가는 전용 단축키. 입력창/메모 에디터에 포커스가
-    // 있을 때는 가로채지 않는다(타이핑을 방해하면 안 되므로).
+    // Alt+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌 점프 전
+    // 위치로 돌아가는 전용 단축키. 맥(Option+←)/Windows/Linux 구분 없이 전
+    // 플랫폼에서 동일하게 동작한다. Windows/Linux에서 Alt+←는 브라우저
+    // 네이티브 뒤로가기 기본 동작이기도 한데, keydown의 기본 동작이라
+    // preventDefault()로 취소할 수 있다 — 아래에서 preventDefault()와
+    // stopPropagation()을 함께 걸고, 리스너도 capture 단계에 등록해서 앱의
+    // 다른 keydown 핸들러보다 먼저 이 이벤트를 소비한다.
+    // e.key로 판별한다 — 메인 키보드 화살표와, NumLock이 꺼진 넘패드 4가
+    // 둘 다 'ArrowLeft'로 들어와 어느 쪽으로 눌러도 같게 동작한다.
+    // 입력창/메모 에디터에 포커스가 있을 때는 가로채지 않는다(타이핑을
+    // 방해하면 안 되므로). 돌아갈 위치가 없으면(jumpBackTop == null)
+    // 가로채지 않고 그대로 흘려보내, 브라우저 네이티브 뒤로가기가 평소대로
+    // 동작하게 둔다.
     const onKeyDown = (e) => {
       if (e.key !== 'ArrowLeft' || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
       if (jumpBackTop == null) return;
       e.preventDefault();
+      e.stopPropagation();
       jumpBack();
     };
 
     window.addEventListener('popstate', onPopState);
-    // 맥에서 Option+←는 브라우저 예약 단축키가 아니라 위 커스텀 점프백에 쓸 수
-    // 있지만, Windows/Linux에서 Alt+←는 브라우저 네이티브 "뒤로가기"라 충돌한다
-    // (preventDefault로도 온전히 안 막히고, 막히면 오히려 네이티브 뒤로가기 +
-    // popstate 복원 경로가 이중으로 꼬인다). 그래서 맥에서만 커스텀 단축키를
-    // 등록하고, 그 외 플랫폼은 네이티브 뒤로가기 + 위 popstate 복원에 맡긴다.
-    if (isMac) window.addEventListener('keydown', onKeyDown);
+    // 예전엔 맥에서만 Option+←를 등록했지만(Windows/Linux의 Alt+←가 브라우저
+    // 네이티브 뒤로가기와 겹쳐서), 이제 플랫폼 구분 없이 항상 등록한다 —
+    // 네이티브 뒤로가기는 위 onKeyDown의 preventDefault()로 억제한다.
+    // capture(true) 단계로 등록해서 앱의 다른 keydown 핸들러보다 먼저 잡는다.
+    // 브라우저 뒤로가기로 돌아가는 경로(위 popstate)도 그대로 함께 살아 있다.
+    window.addEventListener('keydown', onKeyDown, true);
     scrollContainer?.addEventListener('click', onLinkClickCapture, true);
 
     prevSrc = src;
@@ -277,7 +282,7 @@
       clearTimeout(zoomTimer);
       resizeObserver.disconnect();
       window.removeEventListener('popstate', onPopState);
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
       scrollContainer?.removeEventListener('click', onLinkClickCapture, true);
       eventAbort.abort();
     };
