@@ -173,6 +173,11 @@
     // 덮어쓰면 확대/축소 시 pdf.js가 내부적으로 호출하는 재중심 로직까지 건드리게
     // 되는데, 그건 PdfPane.svelte가 이미 커서 기준으로 직접 스크롤을 보정하고
     // 있어서 손대면 오히려 그 보정과 충돌한다.
+    // 아래 보정은 _origGoToDestination이 내부적으로 스크롤에 성공했든 실패했든
+    // 상관없이, pageDiv.getBoundingClientRect()로 "지금 실제로 어디 있는지"를
+    // 다시 재서 scrollTop을 절대값으로 다시 맞춘다 — 그래서 .pdfViewer에 transform이
+    // 걸려있는지 여부와 무관하게 항상 정확하다(아래 style:transform을 휴지
+    // 상태에서 없애도 이 보정 로직은 그대로 안전하다).
     const _origGoToDestination = linkService.goToDestination.bind(linkService);
     linkService.goToDestination = async (dest) => {
       await _origGoToDestination(dest);
@@ -299,7 +304,21 @@
     </details>
   </div>
 {/if}
-<div class="pdfViewer" bind:this={viewerEl} style:transform={`scale(${zoom / renderedZoom})`}></div>
+<!-- 확대율이 막 바뀐 직후(재렌더 debounce 150ms 동안)에만 CSS 미리보기용
+     transform을 걸고, 재렌더가 끝나 zoom === renderedZoom이 되면(=대부분의
+     시간) transform 자체를 아예 없앤다(scale(1)도 안 남긴다). transform이
+     걸려 있으면 값이 1이어도 그 자체로 별도 합성 레이어로 승격되는데, 이게
+     텍스트 레이어(--scale-x 기반 span 배치)와 캔버스가 서로 다른 레이어에서
+     독립적으로 기기 픽셀에 스냅되게 만들어 fractional 배율(Windows 125%/150%)
+     에서 텍스트 선택 하이라이트가 캔버스 글자와 미세하게 어긋나는 걸 키우는
+     원인으로 의심된다. 공식 pdf.js 데모 뷰어엔 이런 상시 transform 래퍼가
+     없어서 같은 문제가 덜 보인다 — 그래서 휴지 상태에선 우리도 transform을
+     완전히 없애 그 데모와 같은 조건으로 맞춘다. -->
+<div
+  class="pdfViewer"
+  bind:this={viewerEl}
+  style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
+></div>
 
 <style>
   .pdfViewer {
