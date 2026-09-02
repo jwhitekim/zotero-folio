@@ -29,6 +29,95 @@
   let pdfDocument;
   let loadedSrc = '';
 
+  // pdf.js의 TextLayer는 DPR을 곱한 크기로 hidden canvas에서 measureText()를
+  // 실행한 뒤 그 비율을 CSS px 크기의 span에 적용한다. Windows fractional
+  // DPI에서는 DirectWrite의 힌팅/반올림 때문에 두 크기의 글자 폭이 정확히
+  // 선형 비례하지 않아 선택 영역이 가로로 누적해서 밀릴 수 있다. PDF가
+  // 지정한 목표 폭은 유지하되, 자연 폭만 실제 DOM span에서 다시 재서
+  // --scale-x를 교정한다. getTextContent는 페이지마다 한 번만 가져온다.
+  const textContentCache = new WeakMap();
+  const textCalibrationJobs = new WeakMap();
+
+  function needsDomTextCalibration() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
+    const ratio = window.devicePixelRatio || 1;
+    return /win/i.test(platform) && Math.abs(ratio - Math.round(ratio)) > 0.001;
+  }
+
+  function getTextContent(pdfPage) {
+    let promise = textContentCache.get(pdfPage);
+    if (!promise) {
+      promise = pdfPage.getTextContent({ includeMarkedContent: true, disableNormalization: true });
+      textContentCache.set(pdfPage, promise);
+    }
+    return promise;
+  }
+
+  function calibrateTextLayer(pageNumber) {
+    if (!needsDomTextCalibration()) return;
+
+    const pageView = pdfViewer?._pages?.[pageNumber - 1];
+    const textLayer = pageView?.textLayer?.div;
+    const textDivs = pageView?._textHighlighter?.textDivs;
+    const pdfPage = pageView?.pdfPage;
+    // 회전된/세로쓰기 텍스트는 width와 height 축이 뒤바뀌므로 여기서 임의로
+    // 보정하지 않는다. 논문 본문의 일반적인 가로쓰기 페이지만 대상이다.
+    if (!textLayer || !textDivs?.length || !pdfPage || pageView.viewport.rotation % 180 !== 0) return;
+
+    const previousJob = textCalibrationJobs.get(textLayer) || Promise.resolve();
+    const job = previousJob
+      .catch(() => {})
+      .then(async () => {
+        const content = await getTextContent(pdfPage);
+        // 기다리는 사이 확대/페이지 재생성으로 레이어가 교체됐으면 폐기한다.
+        if (pageView.textLayer?.div !== textLayer || pageView._textHighlighter?.textDivs !== textDivs) return;
+
+        const items = content.items.filter((item) => item.str !== undefined);
+        const layerWidth = textLayer.getBoundingClientRect().width;
+        const viewportWidth = pageView.viewport.width;
+        if (!(layerWidth > 0) || !(viewportWidth > 0)) return;
+
+        const candidates = [];
+        for (let index = 0; index < Math.min(items.length, textDivs.length); index += 1) {
+          const item = items[index];
+          const span = textDivs[index];
+          if (
+            !span?.isConnected ||
+            !span.style.getPropertyValue('--scale-x') ||
+            span.style.getPropertyValue('--rotate') ||
+            content.styles[item.fontName]?.vertical
+          ) {
+            continue;
+          }
+          candidates.push({
+            span,
+            originalScale: span.style.getPropertyValue('--scale-x'),
+            // item.width는 PDF 좌표 폭이다. viewport 배율과 실제(기기 픽셀
+            // 반올림 후) textLayer/viewport 폭 비율을 함께 적용한다.
+            targetWidth: Math.abs(item.width) * pageView.viewport.scale * (layerWidth / viewportWidth),
+          });
+        }
+
+        // 모든 write를 먼저, 모든 read를 그다음에 수행해 페이지마다 강제
+        // 레이아웃이 한 번만 일어나게 한다. 같은 task 안에서 원복/교정까지
+        // 끝나므로 scaleX=1 상태가 화면에 그려지는 프레임은 없다.
+        for (const { span } of candidates) span.style.setProperty('--scale-x', '1');
+        const naturalWidths = candidates.map(({ span }) => span.getBoundingClientRect().width);
+        candidates.forEach(({ span, originalScale, targetWidth }, index) => {
+          const naturalWidth = naturalWidths[index];
+          span.style.setProperty(
+            '--scale-x',
+            naturalWidth > 0 && targetWidth > 0 ? String(targetWidth / naturalWidth) : originalScale
+          );
+        });
+      })
+      .catch((err) => console.warn('[PdfViewer] 텍스트 레이어 폭 교정 실패', err))
+      .finally(() => {
+        if (textCalibrationJobs.get(textLayer) === job) textCalibrationJobs.delete(textLayer);
+      });
+    textCalibrationJobs.set(textLayer, job);
+  }
+
   // 컨테이너 폭 기준 "페이지가 폭에 딱 맞는" 절대 배율. zoom prop(1 = 그
   // 배율)과 곱해서 PDFViewer에 넘길 실제 절대 배율을 만든다 — PDFViewer의
   // currentScale은 PDF 좌표계 기준 절대값이라 우리 쪽 "폭 맞춤 대비 %"
@@ -222,6 +311,13 @@
       },
       { signal: eventAbort.signal }
     );
+    eventBus.on(
+      'textlayerrendered',
+      ({ pageNumber, error: textLayerError }) => {
+        if (!textLayerError) calibrateTextLayer(pageNumber);
+      },
+      { signal: eventAbort.signal }
+    );
 
     // 브라우저 창 크기뿐 아니라, 원문/노트 패널 사이 구분선을 드래그해서
     // 이 컨테이너 자체의 폭이 바뀌는 경우에도 폭 맞춤을 다시 재야 한다 —
@@ -334,16 +430,6 @@
   :global(.pdfViewer .page) {
     border-radius: 3px;
     box-shadow: 0 4px 18px rgba(77, 47, 33, 0.15);
-  }
-
-  /* pdf.js는 여러 글자로 된 텍스트 span의 목표 폭을 hidden canvas의
-     measureText()로 잰 뒤, 인라인 --scale-x로 실제 DOM 텍스트를 보정한다.
-     Windows fractional DPI에서는 이 측정값과 화면에 그려진 글자의 폭이
-     달라 선택 영역이 오른쪽으로 누적해서 밀릴 수 있으므로, 측정 보정이
-     실제로 들어간 span에 한해서 scaleX를 끈다. pdf.js의 인라인 custom
-     property보다 우선해야 해서 !important가 필요하다. */
-  :global(.pdfViewer .textLayer span[style*='--scale-x']) {
-    --scale-x: 1 !important;
   }
 
   .pdf-error-detail {
