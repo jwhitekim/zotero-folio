@@ -336,6 +336,16 @@
     box-shadow: 0 4px 18px rgba(77, 47, 33, 0.15);
   }
 
+  /* pdf.js는 여러 글자로 된 텍스트 span의 목표 폭을 hidden canvas의
+     measureText()로 잰 뒤, 인라인 --scale-x로 실제 DOM 텍스트를 보정한다.
+     Windows fractional DPI에서는 이 측정값과 화면에 그려진 글자의 폭이
+     달라 선택 영역이 오른쪽으로 누적해서 밀릴 수 있으므로, 측정 보정이
+     실제로 들어간 span에 한해서 scaleX를 끈다. pdf.js의 인라인 custom
+     property보다 우선해야 해서 !important가 필요하다. */
+  :global(.pdfViewer .textLayer span[style*='--scale-x']) {
+    --scale-x: 1 !important;
+  }
+
   .pdf-error-detail {
     max-width: 420px;
     margin: 0.75rem auto 0;
