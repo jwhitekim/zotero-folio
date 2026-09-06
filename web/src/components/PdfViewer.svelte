@@ -314,7 +314,17 @@
     eventBus.on(
       'textlayerrendered',
       ({ pageNumber, error: textLayerError }) => {
-        if (!textLayerError) calibrateTextLayer(pageNumber);
+        if (textLayerError) return;
+        calibrateTextLayer(pageNumber);
+        // textlayerrendered는 임베드 폰트 로딩을 기다리지 않는다 — 캔버스
+        // 렌더러는 폰트가 다 로드될 때까지 기다렸다가 그리는데, 텍스트
+        // 레이어는 그 순간 쓸 수 있는(로딩 전이면 대체) 폰트로 바로 측정해
+        // 버린다. 그래서 폰트 로딩이 늦게 끝나면 방금 잰 자연 폭이 대체
+        // 폰트 기준이라 어긋난 채로 남는다 — "가끔은 맞고 가끔은 틀리는"
+        // 현상의 원인. document.fonts.ready(모든 폰트 로딩 완료 시점) 뒤에
+        // 같은 페이지를 한 번 더 재보정해서, 첫 시도가 로딩 전에 일어났어도
+        // 최종적으로는 실제 폰트 기준 값으로 덮어쓴다.
+        document.fonts.ready.then(() => calibrateTextLayer(pageNumber));
       },
       { signal: eventAbort.signal }
     );
