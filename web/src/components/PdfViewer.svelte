@@ -184,8 +184,11 @@
   // 이미 계산된 채 담겨 있다 — 팔레트 버튼을 누르는 순간엔 선택이 풀려 있을 수도
   // 있어서, 좌표/텍스트는 선택이 살아 있는 시점에 미리 확정해둔다.
   let colorPopup = $state(null); // { items, x, y, above }
-  // 기존 하이라이트를 클릭했을 때 뜨는 삭제 팝업.
-  let deletePopup = $state(null); // { key, x, y, above }
+  // 기존 하이라이트를 클릭했거나, 이미 칠한 자리를 다시 드래그했을 때 뜨는 삭제
+  // 확인 팝업. 실제 삭제(api.deleteHighlight)는 여기서 바로 하지 않고 이 팝업의
+  // "형광펜 지우기" 버튼을 눌러야만 실행된다 — 실수로 지웠을 때 되돌릴 방법이
+  // 없어서, 클릭/드래그 어느 경로든 확인 없이 바로 지우지 않게 한다.
+  let deletePopup = $state(null); // { keys, x, y, above }
   let highlightBusy = $state(false);
   let highlightError = $state('');
   let pageLabels = null;
@@ -382,8 +385,9 @@
   }
 
   // 새로 칠하려는 영역(PDF 좌표, 페이지별)이 이미 있는 하이라이트와 겹치는지 본다.
-  // 겹치면 "덧칠"이 아니라 "지우기"로 취급한다 — 사용자가 이미 칠한 자리를
-  // 다시 드래그하는 건 대개 지우고 싶어서다.
+  // 겹치면 "덧칠"이 아니라 "지우기 후보"로 취급한다 — 사용자가 이미 칠한 자리를
+  // 다시 드래그하는 건 대개 지우고 싶어서다. 다만 여기서 바로 지우지는 않고
+  // 삭제 확인 팝업을 띄워서, 클릭으로 지울 때와 동일하게 확인 단계를 거치게 한다.
   function findOverlappingHighlights(items) {
     const keys = new Set();
     for (const item of items) {
@@ -407,8 +411,7 @@
       if (items.length) {
         const overlapping = findOverlappingHighlights(items);
         if (overlapping.length) {
-          window.getSelection()?.removeAllRanges();
-          toggleOffHighlights(overlapping);
+          deletePopup = { keys: overlapping, ...popupAnchor(range.getBoundingClientRect()) };
         } else {
           colorPopup = { items, ...popupAnchor(range.getBoundingClientRect()) };
         }
@@ -417,7 +420,7 @@
     }
 
     const hit = findHighlightAt(e.clientX, e.clientY);
-    deletePopup = hit ? { key: hit.key, ...popupAnchor(hit.rect) } : null;
+    deletePopup = hit ? { keys: [hit.key], ...popupAnchor(hit.rect) } : null;
   }
 
   async function createHighlight(color) {
@@ -439,10 +442,13 @@
     }
   }
 
-  // 겹치는 자리를 다시 드래그해서 지우는 경로. 클릭 한 번으로 지우는
-  // removeHighlight와 API는 같지만, 여러 하이라이트에 걸쳐 드래그했을 수 있어
-  // 키 목록을 통째로 받는다.
-  async function toggleOffHighlights(keys) {
+  // 삭제 확인 팝업의 "형광펜 지우기" 버튼을 눌렀을 때만 실행된다 — 클릭으로
+  // 하나를 지우든, 겹쳐 드래그해서 여러 개를 지우든 실제 삭제 경로는 이 한
+  // 곳뿐이다(keys는 항상 1개 이상).
+  async function removeHighlight() {
+    const keys = deletePopup?.keys ?? [];
+    closePopups();
+    window.getSelection()?.removeAllRanges();
     if (!keys.length || !itemKey) return;
 
     highlightBusy = true;
@@ -451,22 +457,6 @@
         await api.deleteHighlight(itemKey, key);
       }
       highlights = highlights.filter((h) => !keys.includes(h.key));
-    } catch (err) {
-      showHighlightError(`하이라이트를 지우지 못했어요: ${err.message}`);
-    } finally {
-      highlightBusy = false;
-    }
-  }
-
-  async function removeHighlight() {
-    const key = deletePopup?.key;
-    closePopups();
-    if (!key || !itemKey) return;
-
-    highlightBusy = true;
-    try {
-      await api.deleteHighlight(itemKey, key);
-      highlights = highlights.filter((h) => h.key !== key);
     } catch (err) {
       showHighlightError(`하이라이트를 지우지 못했어요: ${err.message}`);
     } finally {
@@ -718,10 +708,11 @@
     window.addEventListener('keydown', onKeyDown, true);
     scrollContainer?.addEventListener('click', onLinkClickCapture, true);
 
-    // 형광펜 상호작용: 드래그가 끝나면(pointerup) 선택 영역을 보고 색상 팔레트를,
-    // 선택 없이 기존 하이라이트를 눌렀으면 삭제 팝업을 띄운다. 팝업 자체는 이
-    // 스크롤 컨테이너 밖(position: fixed)에 있어서 팝업 버튼 클릭이 여기 다시
-    // 걸리지 않는다.
+    // 형광펜 상호작용: 드래그가 끝나면(pointerup) 새로 선택한 영역을 보고 색상
+    // 팔레트를, 이미 칠한 자리를 겹쳐 드래그했거나 선택 없이 기존 하이라이트를
+    // 눌렀으면 삭제 확인 팝업을 띄운다 — 두 경우 모두 실제 삭제는 그 팝업의
+    // 버튼을 눌러야 실행된다. 팝업 자체는 이 스크롤 컨테이너 밖(position: fixed)에
+    // 있어서 팝업 버튼 클릭이 여기 다시 걸리지 않는다.
     scrollContainer?.addEventListener('pointerdown', onViewerPointerDown);
     scrollContainer?.addEventListener('pointerup', onViewerPointerUp);
     scrollContainer?.addEventListener('scroll', closePopups, { passive: true });
