@@ -215,6 +215,44 @@
     deletePopup = null;
   }
 
+  // 형광펜 팝업(색상 선택/삭제 확인)과 화면상 겹치는 참고문헌 링크는, 팝업이
+  // 떠 있는 동안 pointer-events를 꺼서 클릭을 아예 못 받게 한다. 팝업은
+  // position: fixed + z-index로 항상 위에 그려지긴 하지만, DOM 상으로는 이
+  // 스크롤 컨테이너의 자손이라(잘림 방지를 위해 fixed를 씀) 겹친 지점을
+  // 클릭했을 때 hit-test가 가끔 팝업 버튼이 아니라 그 아래 링크로 잡히는
+  // 사례가 있었다 — z-index만 믿지 않고 좌표로 직접 링크를 무력화해 확실히
+  // 막는다.
+  let suppressedLinks = [];
+
+  function suppressLinksUnderPopup() {
+    const popupEl = scrollContainer?.querySelector('.highlight-popup');
+    if (!popupEl) return;
+    const popupRect = popupEl.getBoundingClientRect();
+    const links = scrollContainer?.querySelectorAll('.annotationLayer .linkAnnotation a') ?? [];
+    for (const a of links) {
+      const r = a.getBoundingClientRect();
+      const overlaps =
+        r.left < popupRect.right && r.right > popupRect.left && r.top < popupRect.bottom && r.bottom > popupRect.top;
+      if (overlaps) {
+        a.style.pointerEvents = 'none';
+        suppressedLinks.push(a);
+      }
+    }
+  }
+
+  function restoreSuppressedLinks() {
+    for (const a of suppressedLinks) a.style.pointerEvents = '';
+    suppressedLinks = [];
+  }
+
+  // 팝업이 열리면(색상 팔레트든 삭제 확인이든) 즉시 겹친 링크를 찾아 무력화하고,
+  // 팝업이 닫히거나 다른 팝업으로 바뀌면 원상복구한다.
+  $effect(() => {
+    if (!colorPopup && !deletePopup) return;
+    suppressLinksUnderPopup();
+    return restoreSuppressedLinks;
+  });
+
   // 확대 미리보기 transform(아래 style:transform)이 걸려 있는 동안의 추가 배율.
   // 화면 좌표는 이 배율까지 곱해진 값이고, 페이지 div 안에 넣을 CSS 박스는
   // 곱해지기 전 값이어야 해서 두 방향에서 서로 다르게 쓴다.
