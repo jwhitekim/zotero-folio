@@ -159,6 +159,15 @@
     if (!scrollContainer) return;
     const link = e.target.closest?.('.annotationLayer .linkAnnotation a');
     if (!link) return;
+    // 참고문헌 링크(위첨자 [3] 등)가 형광펜 위에 겹쳐 있으면, 그 자리를 클릭했을 때
+    // pointerup 핸들러가 이미 삭제 확인 팝업을 띄운 상태다. 여기서 링크 이동까지
+    // 그대로 진행되면 팝업이 뜨자마자 화면이 참고문헌으로 점프해버려 팝업을 누를
+    // 새가 없다 — 형광펜 삭제 상호작용이 링크 이동보다 우선하도록 여기서 막는다.
+    if (itemKey && findHighlightAt(e.clientX, e.clientY)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     // "돌아갈 위치"는 지금 보고 있는(=점프 직전) 히스토리 엔트리에 저장해야
     // 네이티브 뒤로가기 시 popstate가 그 값을 그대로 돌려준다. pushState만
     // 하면 스크롤 값이 "앞으로 갈 새 엔트리"에 들어가 버려서, 뒤로가기 때는
