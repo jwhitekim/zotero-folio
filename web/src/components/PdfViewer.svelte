@@ -18,7 +18,8 @@
     formatSortIndex,
     toPdfRect,
     toPageBox,
-    rectsOverlap,
+    rectArea,
+    rectOverlapArea,
   } from '../utils/pdf-highlight.js';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -393,20 +394,33 @@
     closePopups();
   }
 
-  // 새로 칠하려는 영역(PDF 좌표, 페이지별)이 이미 있는 하이라이트와 겹치는지 본다.
-  // 겹치면 "덧칠"이 아니라 "지우기 후보"로 취급한다 — 사용자가 이미 칠한 자리를
-  // 다시 드래그하는 건 대개 지우고 싶어서다. 다만 여기서 바로 지우지는 않고
-  // 삭제 확인 팝업을 띄워서, 클릭으로 지울 때와 동일하게 확인 단계를 거치게 한다.
-  function findOverlappingHighlights(items) {
+  // 새로 드래그한 선택 전체가 기존 하이라이트 안에 거의 그대로 들어있을 때만
+  // "재선택 = 지우기"로 본다(겹친 넓이 / 새 선택 넓이 >= threshold). 이미 칠한
+  // 단어를 포함해서 더 큰 문장을 새로 드래그하는 것처럼 선택이 하이라이트 밖으로
+  // 삐져나가면(부분 겹침) 지우기가 아니라 새 하이라이트로 취급한다 — 사용자가
+  // 다른/더 넓은 범위를 칠하려던 걸 실수로 지워버리면 안 되기 때문.
+  function findReselectedHighlights(items, threshold = 0.9) {
     const keys = new Set();
+    let coveredArea = 0;
+    let totalArea = 0;
+
     for (const item of items) {
-      for (const h of highlights) {
-        if (h.pageIndex !== item.pageIndex) continue;
-        if (item.rects.some((r) => h.rects.some((hr) => rectsOverlap(r, hr)))) {
-          keys.add(h.key);
+      for (const rect of item.rects) {
+        totalArea += rectArea(rect);
+        for (const h of highlights) {
+          if (h.pageIndex !== item.pageIndex) continue;
+          for (const hr of h.rects) {
+            const overlap = rectOverlapArea(rect, hr);
+            if (overlap > 0) {
+              coveredArea += overlap;
+              keys.add(h.key);
+            }
+          }
         }
       }
     }
+
+    if (!keys.size || totalArea <= 0 || coveredArea / totalArea < threshold) return [];
     return [...keys];
   }
 
@@ -418,9 +432,9 @@
       const range = selection.getRangeAt(0);
       const items = buildHighlightsFromRange(range);
       if (items.length) {
-        const overlapping = findOverlappingHighlights(items);
-        if (overlapping.length) {
-          deletePopup = { keys: overlapping, ...popupAnchor(range.getBoundingClientRect()) };
+        const reselected = findReselectedHighlights(items);
+        if (reselected.length) {
+          deletePopup = { keys: reselected, ...popupAnchor(range.getBoundingClientRect()) };
         } else {
           colorPopup = { items, ...popupAnchor(range.getBoundingClientRect()) };
         }

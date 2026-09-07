@@ -83,6 +83,20 @@ export function rectsOverlap(a, b) {
   return a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 }
 
+// 사각형 넓이. 폭/높이가 음수가 나올 일은 없지만(항상 min/max로 정규화된
+// 값을 넣음) 방어적으로 0 미만은 잘라낸다.
+export function rectArea(r) {
+  return Math.max(0, r[2] - r[0]) * Math.max(0, r[3] - r[1]);
+}
+
+// 두 사각형이 겹치는 부분의 넓이. rectsOverlap이 "닿았는지"만 보는 것과
+// 달리, "얼마나" 겹쳤는지가 필요한 재선택(=지우기) 판정에 쓴다.
+export function rectOverlapArea(a, b) {
+  const w = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+  const h = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  return w * h;
+}
+
 // 화면 좌표(DOMRect)를 PDF 사용자 좌표(좌하단 원점, pt)로 바꾼다.
 // pageRect는 페이지 div의 getBoundingClientRect, scale은 "화면상 페이지 폭 /
 // viewport.width" — 확대 미리보기 transform이 걸려 있는 동안에도 어긋나지
