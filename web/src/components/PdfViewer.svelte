@@ -9,6 +9,17 @@
   import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
   import 'pdfjs-dist/web/pdf_viewer.css';
   import pdfWorkerUrl from '../utils/pdf-worker-entry.js?worker&url';
+  import { api } from '../services/api.js';
+  import {
+    HIGHLIGHT_COLORS,
+    mergeLineRects,
+    extractRangeText,
+    normalizeText,
+    formatSortIndex,
+    toPdfRect,
+    toPageBox,
+    rectsOverlap,
+  } from '../utils/pdf-highlight.js';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -16,7 +27,8 @@
   // PDFViewer가 스크롤 위치/가시 영역을 직접 읽고 쓰는 대상이라, 우리 것과
   // 같은 요소를 넘겨줘야 확대 시 커서 고정 스크롤 보정(PdfPane.svelte의
   // zoomTo)이 계속 같은 스크롤 위치 기준으로 동작한다.
-  let { src, zoom = 1, scrollContainer } = $props();
+  // itemKey: 하이라이트를 읽고 쓸 논문 키. 없으면 형광펜 기능만 조용히 꺼진다.
+  let { src, zoom = 1, scrollContainer, itemKey = null } = $props();
 
   let viewerEl = $state();
   let loading = $state(true);
@@ -162,6 +174,315 @@
     jumpBackTop = scrollContainer.scrollTop;
   }
 
+  // --- 형광펜(하이라이트) ------------------------------------------------
+  // 저장소는 Zotero다. 여기서 만든 하이라이트는 Zotero 표준 annotation
+  // 아이템(annotationType: highlight)으로 바로 저장되고, 반대로 Zotero
+  // 데스크톱/모바일에서 칠한 것도 그대로 읽어와서 그린다 — Folio는 하이라이트를
+  // 로컬에 따로 캐시하지 않는다.
+  let highlights = $state([]);
+  // 드래그 선택 직후 뜨는 색상 팔레트. items에는 "페이지별로 만들 하이라이트"가
+  // 이미 계산된 채 담겨 있다 — 팔레트 버튼을 누르는 순간엔 선택이 풀려 있을 수도
+  // 있어서, 좌표/텍스트는 선택이 살아 있는 시점에 미리 확정해둔다.
+  let colorPopup = $state(null); // { items, x, y, above }
+  // 기존 하이라이트를 클릭했을 때 뜨는 삭제 팝업.
+  let deletePopup = $state(null); // { key, x, y, above }
+  let highlightBusy = $state(false);
+  let highlightError = $state('');
+  let pageLabels = null;
+  let errorTimer;
+
+  function showHighlightError(message) {
+    highlightError = message;
+    clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => (highlightError = ''), 4000);
+  }
+
+  function closePopups() {
+    colorPopup = null;
+    deletePopup = null;
+  }
+
+  // 확대 미리보기 transform(아래 style:transform)이 걸려 있는 동안의 추가 배율.
+  // 화면 좌표는 이 배율까지 곱해진 값이고, 페이지 div 안에 넣을 CSS 박스는
+  // 곱해지기 전 값이어야 해서 두 방향에서 서로 다르게 쓴다.
+  function previewFactor() {
+    return zoom === renderedZoom || !renderedZoom ? 1 : zoom / renderedZoom;
+  }
+
+  // "화면상 페이지 폭 / viewport 폭". 기기 픽셀 반올림까지 포함해 실측한다.
+  function visualScale(pageView) {
+    const width = pageView.div?.getBoundingClientRect().width ?? 0;
+    const viewportWidth = pageView.viewport?.width ?? 0;
+    return width > 0 && viewportWidth > 0 ? width / viewportWidth : 1;
+  }
+
+  function pageViews() {
+    return pdfViewer?._pages ?? [];
+  }
+
+  function highlightLayerOf(pageView) {
+    return pageView.div?.querySelector(':scope > .folio-highlight-layer') ?? null;
+  }
+
+  // 한 페이지의 하이라이트 사각형을 다시 그린다. pdf.js는 배율이 바뀔 때마다
+  // 페이지 div의 자식을 전부 지우고(PDFPageView.reset) 다시 만들기 때문에,
+  // 우리 레이어도 pagerendered 때마다 새로 붙여야 한다.
+  function renderHighlightLayer(pageNumber) {
+    const pageView = pageViews()[pageNumber - 1];
+    if (!pageView?.div || !pageView.viewport) return;
+
+    const pageIndex = pageNumber - 1;
+    const items = highlights.filter((h) => h.pageIndex === pageIndex);
+    let layer = highlightLayerOf(pageView);
+
+    if (!items.length) {
+      layer?.remove();
+      return;
+    }
+
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'folio-highlight-layer';
+    }
+    // 텍스트 레이어보다 앞(=아래)에 둬서 캔버스 위·글자 아래에 깔리게 한다.
+    // 텍스트 레이어는 페이지가 그려진 뒤에 따로 붙기 때문에, 이미 있는
+    // 레이어라도 매번 위치를 다시 잡아준다(insertBefore는 기존 노드를 옮긴다).
+    const textLayerDiv = pageView.textLayer?.div;
+    pageView.div.insertBefore(layer, textLayerDiv?.parentNode === pageView.div ? textLayerDiv : null);
+
+    const scale = visualScale(pageView) / previewFactor();
+    layer.replaceChildren(
+      ...items.flatMap((highlight) =>
+        highlight.rects.map((rect) => {
+          const box = toPageBox(rect, pageView.viewport, scale);
+          const el = document.createElement('div');
+          el.className = 'folio-highlight';
+          el.dataset.highlightKey = highlight.key;
+          el.style.left = `${box.left}px`;
+          el.style.top = `${box.top}px`;
+          el.style.width = `${box.width}px`;
+          el.style.height = `${box.height}px`;
+          el.style.background = highlight.color;
+          return el;
+        })
+      )
+    );
+  }
+
+  function renderAllHighlightLayers() {
+    for (let i = 1; i <= pageViews().length; i += 1) renderHighlightLayer(i);
+  }
+
+  async function loadHighlights() {
+    highlights = [];
+    if (!itemKey) return;
+    try {
+      highlights = await api.listHighlights(itemKey);
+    } catch (err) {
+      // 하이라이트를 못 읽어도 PDF 읽기 자체는 계속돼야 한다 — 로그만 남긴다.
+      console.warn('[PdfViewer] 하이라이트 조회 실패', err);
+    }
+  }
+
+  // 선택 영역을 "페이지별 하이라이트 1개"로 쪼갠다. 페이지를 걸쳐 드래그하면
+  // Zotero annotation의 position이 페이지 하나만 담을 수 있으므로 페이지 수만큼
+  // 나눠서 만든다.
+  function buildHighlightsFromRange(range) {
+    const built = [];
+
+    for (const pageView of pageViews()) {
+      const textLayerDiv = pageView?.textLayer?.div;
+      if (!textLayerDiv || !pageView.div || !pageView.viewport) continue;
+      if (!range.intersectsNode(textLayerDiv)) continue;
+
+      const pageRange = document.createRange();
+      pageRange.selectNodeContents(textLayerDiv);
+
+      // 선택 범위를 이 페이지 안쪽으로 잘라낸다.
+      const clipped = range.cloneRange();
+      if (clipped.compareBoundaryPoints(Range.START_TO_START, pageRange) < 0) {
+        clipped.setStart(pageRange.startContainer, pageRange.startOffset);
+      }
+      if (clipped.compareBoundaryPoints(Range.END_TO_END, pageRange) > 0) {
+        clipped.setEnd(pageRange.endContainer, pageRange.endOffset);
+      }
+      if (clipped.collapsed) continue;
+
+      const text = normalizeText(extractRangeText(clipped));
+      const pageRect = pageView.div.getBoundingClientRect();
+      const scale = visualScale(pageView);
+      const rects = mergeLineRects([...clipped.getClientRects()]).map((rect) =>
+        toPdfRect(rect, pageRect, pageView.viewport, scale)
+      );
+      if (!text || !rects.length) continue;
+
+      // sortIndex의 문자 오프셋 — 페이지 첫 글자부터 선택 시작점까지의 길이.
+      // Zotero 사이드바 정렬용 값이라 같은 페이지 안 순서만 맞으면 충분하다.
+      const beforeRange = document.createRange();
+      beforeRange.setStart(pageRange.startContainer, pageRange.startOffset);
+      beforeRange.setEnd(clipped.startContainer, clipped.startOffset);
+      const offset = extractRangeText(beforeRange).length;
+
+      const pageIndex = pageView.id - 1;
+      const viewBox = pageView.viewport.viewBox ?? [0, 0, 0, 0];
+      built.push({
+        pageIndex,
+        rects,
+        text,
+        pageLabel: pageLabels?.[pageIndex] || String(pageIndex + 1),
+        sortIndex: formatSortIndex(pageIndex, offset, viewBox[3] - rects[0][3]),
+      });
+    }
+
+    return built;
+  }
+
+  // 팝업은 position: fixed라 화면 좌표를 그대로 쓴다. 위쪽 공간이 모자라면
+  // 선택 영역 아래로 내려서 띄운다.
+  function popupAnchor(rect) {
+    const above = rect.top > 96;
+    return {
+      x: Math.min(window.innerWidth - 100, Math.max(100, rect.left + rect.width / 2)),
+      y: above ? rect.top - 8 : rect.bottom + 8,
+      above,
+    };
+  }
+
+  // 클릭 지점에 있는 하이라이트를 찾는다. 하이라이트 레이어는 텍스트 레이어
+  // 아래에 깔려 있어서 클릭 이벤트가 직접 닿지 않으므로, 사각형과 직접 비교한다.
+  function findHighlightAt(clientX, clientY) {
+    for (const pageView of pageViews()) {
+      const layer = pageView?.div ? highlightLayerOf(pageView) : null;
+      if (!layer) continue;
+      for (const el of layer.children) {
+        const rect = el.getBoundingClientRect();
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          return { key: el.dataset.highlightKey, rect };
+        }
+      }
+    }
+    return null;
+  }
+
+  // 팝업 자체는 position: fixed로 떠 있지만 DOM 상으로는 스크롤 컨테이너의
+  // 자손이라, 팝업 버튼을 누른 pointerdown도 여기까지 올라온다. 그대로 두면
+  // 색상 버튼을 누르는 순간 팝업이 닫혀 사라져서 click이 아예 안 걸린다.
+  function isInsidePopup(e) {
+    return !!e.target?.closest?.('.highlight-popup');
+  }
+
+  function onViewerPointerDown(e) {
+    if (isInsidePopup(e)) return;
+    closePopups();
+  }
+
+  // 새로 칠하려는 영역(PDF 좌표, 페이지별)이 이미 있는 하이라이트와 겹치는지 본다.
+  // 겹치면 "덧칠"이 아니라 "지우기"로 취급한다 — 사용자가 이미 칠한 자리를
+  // 다시 드래그하는 건 대개 지우고 싶어서다.
+  function findOverlappingHighlights(items) {
+    const keys = new Set();
+    for (const item of items) {
+      for (const h of highlights) {
+        if (h.pageIndex !== item.pageIndex) continue;
+        if (item.rects.some((r) => h.rects.some((hr) => rectsOverlap(r, hr)))) {
+          keys.add(h.key);
+        }
+      }
+    }
+    return [...keys];
+  }
+
+  function onViewerPointerUp(e) {
+    if (!itemKey || highlightBusy || isInsidePopup(e)) return;
+
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const items = buildHighlightsFromRange(range);
+      if (items.length) {
+        const overlapping = findOverlappingHighlights(items);
+        if (overlapping.length) {
+          window.getSelection()?.removeAllRanges();
+          toggleOffHighlights(overlapping);
+        } else {
+          colorPopup = { items, ...popupAnchor(range.getBoundingClientRect()) };
+        }
+        return;
+      }
+    }
+
+    const hit = findHighlightAt(e.clientX, e.clientY);
+    deletePopup = hit ? { key: hit.key, ...popupAnchor(hit.rect) } : null;
+  }
+
+  async function createHighlight(color) {
+    const items = colorPopup?.items ?? [];
+    closePopups();
+    window.getSelection()?.removeAllRanges();
+    if (!items.length || !itemKey) return;
+
+    highlightBusy = true;
+    try {
+      for (const item of items) {
+        const created = await api.createHighlight(itemKey, { ...item, color });
+        highlights = [...highlights, created];
+      }
+    } catch (err) {
+      showHighlightError(`하이라이트를 저장하지 못했어요: ${err.message}`);
+    } finally {
+      highlightBusy = false;
+    }
+  }
+
+  // 겹치는 자리를 다시 드래그해서 지우는 경로. 클릭 한 번으로 지우는
+  // removeHighlight와 API는 같지만, 여러 하이라이트에 걸쳐 드래그했을 수 있어
+  // 키 목록을 통째로 받는다.
+  async function toggleOffHighlights(keys) {
+    if (!keys.length || !itemKey) return;
+
+    highlightBusy = true;
+    try {
+      for (const key of keys) {
+        await api.deleteHighlight(itemKey, key);
+      }
+      highlights = highlights.filter((h) => !keys.includes(h.key));
+    } catch (err) {
+      showHighlightError(`하이라이트를 지우지 못했어요: ${err.message}`);
+    } finally {
+      highlightBusy = false;
+    }
+  }
+
+  async function removeHighlight() {
+    const key = deletePopup?.key;
+    closePopups();
+    if (!key || !itemKey) return;
+
+    highlightBusy = true;
+    try {
+      await api.deleteHighlight(itemKey, key);
+      highlights = highlights.filter((h) => h.key !== key);
+    } catch (err) {
+      showHighlightError(`하이라이트를 지우지 못했어요: ${err.message}`);
+    } finally {
+      highlightBusy = false;
+    }
+  }
+
+  // 하이라이트 목록이 바뀌면 현재 렌더된 페이지들의 레이어를 다시 그린다.
+  // (zoom/renderedZoom도 함께 읽히므로 확대 중에도 좌표가 따라온다)
+  $effect(() => {
+    highlights;
+    zoom;
+    renderedZoom;
+    renderAllHighlightLayers();
+  });
+
   async function loadDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
     pdfDocument = await pdfjsLib.getDocument({ url }).promise;
@@ -188,10 +509,15 @@
     if (!pdfViewer) return;
     loading = true;
     error = '';
+    closePopups();
     try {
       const doc = await loadDocument(url);
       linkService.setDocument(doc);
       pdfViewer.setDocument(doc);
+      // annotationPageLabel에 넣을 "표지 기준 페이지 번호". 없는 PDF도 많아서
+      // 실패하면 그냥 물리 페이지 번호(1부터)로 대체한다.
+      pageLabels = await doc.getPageLabels().catch(() => null);
+      await loadHighlights();
       // 나머지(배율 계산/loading 해제)는 pagesinit 이벤트에서 처리한다.
     } catch (err) {
       error = err.message;
@@ -311,9 +637,17 @@
       },
       { signal: eventAbort.signal }
     );
+    // 확대/스크롤로 페이지가 다시 그려질 때마다 pdf.js가 페이지 div의 자식을
+    // 전부 비우므로(PDFPageView.reset), 우리 하이라이트 레이어도 그때마다 새로 붙인다.
+    eventBus.on('pagerendered', ({ pageNumber }) => renderHighlightLayer(pageNumber), {
+      signal: eventAbort.signal,
+    });
     eventBus.on(
       'textlayerrendered',
       ({ pageNumber, error: textLayerError }) => {
+        // 텍스트 레이어가 나중에 붙어도 하이라이트가 그 아래로 가도록 순서를
+        // 다시 잡아준다(레이어를 지웠다 다시 만들면서 위치가 정해진다).
+        renderHighlightLayer(pageNumber);
         if (textLayerError) return;
         calibrateTextLayer(pageNumber);
         // textlayerrendered는 임베드 폰트 로딩을 기다리지 않는다 — 캔버스
@@ -384,6 +718,14 @@
     window.addEventListener('keydown', onKeyDown, true);
     scrollContainer?.addEventListener('click', onLinkClickCapture, true);
 
+    // 형광펜 상호작용: 드래그가 끝나면(pointerup) 선택 영역을 보고 색상 팔레트를,
+    // 선택 없이 기존 하이라이트를 눌렀으면 삭제 팝업을 띄운다. 팝업 자체는 이
+    // 스크롤 컨테이너 밖(position: fixed)에 있어서 팝업 버튼 클릭이 여기 다시
+    // 걸리지 않는다.
+    scrollContainer?.addEventListener('pointerdown', onViewerPointerDown);
+    scrollContainer?.addEventListener('pointerup', onViewerPointerUp);
+    scrollContainer?.addEventListener('scroll', closePopups, { passive: true });
+
     prevSrc = src;
     prevZoom = zoom;
     loadAndShow(src);
@@ -391,10 +733,14 @@
     return () => {
       clearTimeout(resizeTimer);
       clearTimeout(zoomTimer);
+      clearTimeout(errorTimer);
       resizeObserver.disconnect();
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown, true);
       scrollContainer?.removeEventListener('click', onLinkClickCapture, true);
+      scrollContainer?.removeEventListener('pointerdown', onViewerPointerDown);
+      scrollContainer?.removeEventListener('pointerup', onViewerPointerUp);
+      scrollContainer?.removeEventListener('scroll', closePopups);
       eventAbort.abort();
     };
   });
@@ -426,6 +772,45 @@
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
 ></div>
 
+<!-- 형광펜 팝업 2종. 스크롤 컨테이너 안쪽에 있으면 잘려나가므로 position: fixed로
+     띄운다 — .pdfViewer(확대 미리보기 transform이 걸리는 요소)의 자식이 아니라
+     형제라서 transform의 영향도 받지 않는다. -->
+{#if colorPopup}
+  <div
+    class="highlight-popup"
+    style:left={`${colorPopup.x}px`}
+    style:top={`${colorPopup.y}px`}
+    style:transform={colorPopup.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'}
+    role="toolbar"
+    aria-label="형광펜 색상"
+  >
+    {#each HIGHLIGHT_COLORS as color (color.value)}
+      <button
+        class="highlight-swatch"
+        style:background={color.value}
+        title={`${color.label} 형광펜`}
+        aria-label={`${color.label} 형광펜으로 칠하기`}
+        onclick={() => createHighlight(color.value)}
+      ></button>
+    {/each}
+  </div>
+{/if}
+
+{#if deletePopup}
+  <div
+    class="highlight-popup"
+    style:left={`${deletePopup.x}px`}
+    style:top={`${deletePopup.y}px`}
+    style:transform={deletePopup.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'}
+  >
+    <button class="highlight-delete" onclick={removeHighlight}>형광펜 지우기</button>
+  </div>
+{/if}
+
+{#if highlightError}
+  <p class="highlight-error" role="alert">{highlightError}</p>
+{/if}
+
 <style>
   .pdfViewer {
     /* 세로 앵커링은 부모(PdfPane.svelte)가 scrollTop을 직접 보정하는
@@ -440,6 +825,79 @@
   :global(.pdfViewer .page) {
     border-radius: 3px;
     box-shadow: 0 4px 18px rgba(77, 47, 33, 0.15);
+  }
+
+  /* 하이라이트 레이어. 페이지 div 안에 DOM API로 직접 만들어 넣기 때문에
+     Svelte의 스코프 클래스가 안 붙어서 :global로 선언한다.
+     텍스트 레이어(z-index: 0)보다 DOM 순서상 앞에 있어서 글자 아래에 깔리고,
+     mix-blend-mode: multiply 덕분에 칠해도 글자가 그대로 읽힌다.
+     클릭 판정은 사각형 좌표로 직접 하므로(findHighlightAt) 포인터 이벤트는
+     받지 않는다 — 텍스트 드래그 선택을 방해하면 안 되기 때문. */
+  :global(.folio-highlight-layer) {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  :global(.folio-highlight) {
+    position: absolute;
+    border-radius: 1px;
+    opacity: 0.42;
+    mix-blend-mode: multiply;
+  }
+
+  .highlight-popup {
+    position: fixed;
+    z-index: 40;
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.3rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm), 0 6px 20px rgba(77, 47, 33, 0.18);
+  }
+
+  .highlight-swatch {
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    transition: transform 140ms ease;
+  }
+
+  .highlight-swatch:hover {
+    transform: scale(1.12);
+  }
+
+  .highlight-delete {
+    padding: 0.25rem 0.55rem;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+
+  .highlight-delete:hover {
+    background: var(--accent-pale);
+    color: var(--accent);
+  }
+
+  .highlight-error {
+    position: fixed;
+    z-index: 40;
+    bottom: 1.5rem;
+    left: 50%;
+    padding: 0.45rem 0.8rem;
+    transform: translateX(-50%);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm), 0 6px 20px rgba(77, 47, 33, 0.18);
+    color: var(--text-soft);
+    font-size: 0.72rem;
   }
 
   .pdf-error-detail {

@@ -26,6 +26,13 @@ export const api = {
   saveMemo: (key, markdown) =>
     request(`/api/papers/${key}/memo`, { method: 'PUT', ...jsonBody({ markdown }) }),
 
+  // 하이라이트(형광펜) — Zotero annotation 아이템에 직접 읽고 쓴다.
+  listHighlights: (key) => request(`/api/papers/${key}/highlights`),
+  createHighlight: (key, highlight) =>
+    request(`/api/papers/${key}/highlights`, { method: 'POST', ...jsonBody(highlight) }),
+  deleteHighlight: (key, annotationKey) =>
+    request(`/api/papers/${key}/highlights/${annotationKey}`, { method: 'DELETE' }),
+
   listCollections: () => request('/api/collections'),
   listCollectionPapers: (key) => request(`/api/collections/${key}/papers`),
 };

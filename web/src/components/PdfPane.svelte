@@ -10,7 +10,9 @@
   // iframe에 띄운다 — 둘 다 없으면 빈 상태를 보여준다. 두 뷰어 모두 이 zoom
   // 상태값 하나(pdfZoom)와 zoomStep/zoomTo 계산을 공유해서, 어느 원문
   // 타입이든 확대/축소가 똑같이 동작한다.
-  let { attachmentType, contentUrl, noteCollapsed, onToggleNoteCollapse } = $props();
+  // itemKey는 PDF 하이라이트(형광펜)를 Zotero에 읽고 쓸 때만 쓴다 — HTML
+  // 스냅샷에는 하이라이트 개념이 없어서 HtmlViewer로는 내려보내지 않는다.
+  let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse } = $props();
 
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
@@ -99,7 +101,7 @@
   {#if attachmentType === 'pdf'}
     <div class="viewer-scroll-wrap">
       <div class="viewer-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
-        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} />
+        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} />
       </div>
     </div>
   {:else if attachmentType === 'html'}

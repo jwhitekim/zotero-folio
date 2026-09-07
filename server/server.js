@@ -36,6 +36,8 @@ import {
   deleteItem,
   listCollections,
   downloadAttachmentFile,
+  fetchAttachmentAnnotations,
+  createHighlightAnnotation,
 } from './zotero.js';
 import { getRequestToken, buildAuthorizeUrl, getAccessToken } from './oauth1.js';
 
@@ -49,6 +51,12 @@ const CONSUMER_KEY = process.env.ZOTERO_CLIENT_KEY;
 const CONSUMER_SECRET = process.env.ZOTERO_CLIENT_SECRET;
 
 const MEMO_TAG = 'zotero-insight:memo';
+
+// Zotero 기본 하이라이트 팔레트 (web/src/utils/pdf-highlight.js와 같은 값).
+// 클라이언트를 못 믿고 서버가 따로 한 번 더 검사해야 하므로 목록을 여기에도 둔다.
+const HIGHLIGHT_COLORS = ['#ffd400', '#ff6666', '#5fb236', '#2ea8e5', '#a28ae5'];
+// Zotero 스키마가 요구하는 sortIndex 형식 — "페이지|문자오프셋|위에서부터의 거리".
+const SORT_INDEX_PATTERN = /^\d{5}\|\d{6}\|\d{5}$/;
 
 function extractAuthors(creators) {
   if (!creators) return [];
@@ -393,6 +401,120 @@ function extractHtmlFromZip(buffer) {
   if (!entry) throw new Error('스냅샷 안에서 html 파일을 찾지 못했습니다');
   return entry.getData();
 }
+
+// --- 하이라이트(형광펜) --------------------------------------------------
+// Zotero 표준 annotation 아이템(annotationType: highlight)으로만 저장한다.
+// Folio 쪽 DB에는 아무것도 캐시하지 않는다 — 열 때마다 Zotero에서 라이브로
+// 읽고, 만들거나 지울 때도 Zotero에 바로 쓴다. 그래서 Zotero 데스크톱/모바일
+// 앱에서 칠한 하이라이트도 여기 그대로 나오고, 반대도 마찬가지다.
+
+function toHighlight(item) {
+  let position = {};
+  try {
+    position = JSON.parse(item.data.annotationPosition || '{}');
+  } catch {
+    position = {};
+  }
+  return {
+    key: item.key,
+    version: item.version,
+    color: item.data.annotationColor || '#ffd400',
+    text: item.data.annotationText || '',
+    pageLabel: item.data.annotationPageLabel || '',
+    sortIndex: item.data.annotationSortIndex || '',
+    pageIndex: Number.isInteger(position.pageIndex) ? position.pageIndex : 0,
+    rects: Array.isArray(position.rects) ? position.rects : [],
+  };
+}
+
+function isValidRect(rect) {
+  return (
+    Array.isArray(rect) && rect.length === 4 && rect.every((n) => typeof n === 'number' && Number.isFinite(n))
+  );
+}
+
+// 하이라이트 API는 전부 "이 논문에 PDF 첨부가 있는가"부터 확인한다.
+function getPdfPaper(itemKey) {
+  const paper = getPaper(itemKey);
+  return paper?.attachmentKey && paper.attachmentType === 'pdf' ? paper : null;
+}
+
+app.get('/api/papers/:key/highlights', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  try {
+    const annotations = await fetchAttachmentAnnotations(paper.attachmentKey);
+    // 이번 범위는 텍스트 하이라이트뿐이라 다른 annotation 타입(메모/이미지/밑줄)은
+    // 화면에 그리지 않고 건너뛴다 — 그려줄 방법이 없는 걸 억지로 사각형으로
+    // 표시하면 Zotero 쪽 원본과 다르게 보인다.
+    res.json(
+      annotations
+        .filter((item) => item.data.annotationType === 'highlight' && !item.data.deleted)
+        .map(toHighlight)
+        .filter((h) => h.rects.every(isValidRect) && h.rects.length > 0)
+    );
+  } catch (err) {
+    console.error('[highlights list] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/papers/:key/highlights', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  const { pageIndex, rects, text, color, pageLabel, sortIndex } = req.body || {};
+  if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+    return res.status(400).json({ error: 'pageIndex(0 이상 정수)가 필요합니다' });
+  }
+  if (!Array.isArray(rects) || rects.length === 0 || !rects.every(isValidRect)) {
+    return res.status(400).json({ error: 'rects([x1,y1,x2,y2] 배열)가 필요합니다' });
+  }
+  if (!HIGHLIGHT_COLORS.includes(color)) {
+    return res.status(400).json({ error: '지원하지 않는 하이라이트 색상입니다' });
+  }
+  if (!SORT_INDEX_PATTERN.test(sortIndex || '')) {
+    return res.status(400).json({ error: 'sortIndex 형식이 올바르지 않습니다' });
+  }
+
+  try {
+    const created = await createHighlightAnnotation(paper.attachmentKey, {
+      text: typeof text === 'string' ? text.slice(0, 5000) : '',
+      color,
+      pageLabel: String(pageLabel || pageIndex + 1).slice(0, 50),
+      sortIndex,
+      position: { pageIndex, rects },
+    });
+    res.status(201).json(toHighlight(created));
+  } catch (err) {
+    console.error('[highlights create] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/papers/:key/highlights/:annotationKey', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  try {
+    const item = await fetchItem(req.params.annotationKey);
+    // 지우기 전에 "정말 이 논문 PDF에 달린 하이라이트 annotation인지"를 확인한다.
+    // 이 경로로 원본 서지 아이템이나 첨부파일 자체가 삭제되는 일은 없어야 한다.
+    if (
+      item.data.itemType !== 'annotation' ||
+      item.data.annotationType !== 'highlight' ||
+      item.data.parentItem !== paper.attachmentKey
+    ) {
+      return res.status(400).json({ error: '이 논문의 하이라이트가 아닙니다' });
+    }
+    await deleteItem(item.key, item.version);
+    res.status(204).end();
+  } catch (err) {
+    console.error('[highlights delete] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- 컬렉션 ------------------------------------------------------------
 

@@ -104,6 +104,7 @@
       <PdfPane
         attachmentType={paper.attachmentType}
         contentUrl={paper.attachmentType ? `/api/papers/${itemKey}/${paper.attachmentType}` : null}
+        {itemKey}
         {noteCollapsed}
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
       />

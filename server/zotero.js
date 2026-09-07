@@ -1,8 +1,11 @@
 // Zotero Web API 클라이언트.
-// 읽기: 변경된 아이템 조회(버전 기반 증분), 자식 아이템/컬렉션 조회, PDF 다운로드
-// 쓰기: note 생성/수정만 지원한다. 원본 아이템의 title/author/PDF 등 서지정보
-//       필드를 수정하는 함수는 의도적으로 만들지 않는다 (CLAUDE.md 제약).
-//       단, 이 도구가 직접 만든 메모 note(태그로 식별)는 생성/수정 둘 다 한다.
+// 읽기: 변경된 아이템 조회(버전 기반 증분), 자식 아이템/컬렉션 조회, PDF 다운로드,
+//       PDF 첨부의 annotation(하이라이트) 조회
+// 쓰기: note 생성/수정과 annotation(하이라이트) 생성/삭제만 지원한다. 원본
+//       아이템의 title/author/PDF 등 서지정보 필드를 수정하는 함수는 의도적으로
+//       만들지 않는다 (CLAUDE.md 제약). 단, 이 도구가 직접 만든 메모 note(태그로
+//       식별)는 생성/수정 둘 다 한다. 하이라이트도 "새 아이템 생성"이라
+//       첨부파일 아이템 자체는 건드리지 않는다.
 
 import crypto from 'node:crypto';
 import { getZoteroAuth } from './db.js';
@@ -156,6 +159,75 @@ export async function downloadAttachmentFile(attachmentKey) {
   }
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+// PDF 첨부파일에 달린 annotation 아이템을 전부 가져온다 (하이라이트 렌더링용).
+// Zotero 데이터 모델상 annotation은 attachment의 자식이다. 하이라이트 원문은
+// 로컬 DB에 캐시하지 않고 열 때마다 여기서 라이브로 읽는다 — 메모 note와 같은
+// 원칙이라 Zotero 데스크톱/모바일에서 칠한 것도 그대로 같이 보인다.
+export async function fetchAttachmentAnnotations(attachmentKey) {
+  const annotations = [];
+  let url = `${userPrefix()}/items/${attachmentKey}/children?format=json&itemType=annotation&limit=100`;
+
+  while (url) {
+    const res = await fetch(url, { headers: headers() });
+    if (!res.ok) {
+      throw new Error(`Zotero annotation 조회 실패: ${res.status} ${res.statusText}`);
+    }
+
+    annotations.push(...(await res.json()));
+
+    const link = res.headers.get('Link');
+    const nextMatch = link && link.match(/<([^>]+)>;\s*rel="next"/);
+    url = nextMatch ? nextMatch[1] : null;
+  }
+
+  return annotations;
+}
+
+// 하이라이트 annotation 아이템을 새로 만든다 (parentItem은 PDF attachment).
+// Zotero 표준 아이템이라 데스크톱/모바일 앱에서도 그대로 보이고 Zotero sync로
+// 기기 간 동기화된다 — Folio가 별도 하이라이트 저장소를 갖지 않는 이유다.
+export async function createHighlightAnnotation(
+  attachmentKey,
+  { text, color, pageLabel, sortIndex, position }
+) {
+  const body = [
+    {
+      itemType: 'annotation',
+      parentItem: attachmentKey,
+      annotationType: 'highlight',
+      annotationText: text,
+      annotationComment: '',
+      annotationColor: color,
+      annotationPageLabel: pageLabel,
+      annotationSortIndex: sortIndex,
+      // Zotero 스펙상 position은 객체가 아니라 JSON 문자열로 넣어야 한다.
+      annotationPosition: JSON.stringify(position),
+      tags: [],
+    },
+  ];
+
+  const res = await fetch(`${userPrefix()}/items`, {
+    method: 'POST',
+    headers: {
+      ...headers(),
+      'Zotero-Write-Token': writeToken(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Zotero 하이라이트 생성 실패: ${res.status} ${res.statusText}`);
+  }
+
+  const result = await res.json();
+  const created = result.successful?.['0'];
+  if (!created) {
+    throw new Error(`Zotero 하이라이트 생성 실패: ${JSON.stringify(result.failed)}`);
+  }
+  return created; // {key, version, data}
 }
 
 // child note 생성 (parentItem에 귀속).
