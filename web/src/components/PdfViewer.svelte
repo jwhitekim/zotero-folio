@@ -266,14 +266,29 @@
   // 팝업이 마지막 모습(위치/색/버튼)을 유지한 채 사라지게 한다.
   let popupView = $state(null); // { kind: 'color' | 'delete', x, y, above }
 
+  // 팝업이 열린 순간의 스크롤 위치. 스크롤로 팝업을 닫을 때, 실제로 화면이
+  // 움직였을 때만 닫기 위한 기준값이다 — 팝업이 뜨는 것과 같은 틱에 스크롤
+  // 이벤트가 한 번 발생하면(선택 영역 정리, 레이어 재배치 등) 방금 연 팝업이
+  // 즉시 닫혀서 "드래그해도 팝업이 안 뜨는" 것처럼 보였다.
+  let popupScrollTop = 0;
+
   function openColorPopup(items, anchor) {
+    popupScrollTop = scrollContainer?.scrollTop ?? 0;
     colorPopup = { items, ...anchor };
     popupView = { kind: 'color', ...anchor };
   }
 
   function openDeletePopup(keys, anchor) {
+    popupScrollTop = scrollContainer?.scrollTop ?? 0;
     deletePopup = { keys, ...anchor };
     popupView = { kind: 'delete', ...anchor };
+  }
+
+  function onViewerScroll() {
+    if (!colorPopup && !deletePopup) return;
+    // 1px도 안 움직였으면 진짜 스크롤이 아니다 — 방금 연 팝업을 지키기 위해 무시.
+    if (Math.abs((scrollContainer?.scrollTop ?? 0) - popupScrollTop) < 1) return;
+    closePopups();
   }
 
   // 팝업 등장/퇴장 모션. 선택 영역 쪽에서 살짝 밀려 나오며 뜨고 같은 궤적으로
@@ -314,24 +329,37 @@
   let suppressedLinks = [];
 
   function suppressLinksUnderPopup() {
-    const popupEl = scrollContainer?.querySelector('.highlight-popup');
-    if (!popupEl) return;
-    const popupRect = popupEl.getBoundingClientRect();
-    const links = scrollContainer?.querySelectorAll('.annotationLayer .linkAnnotation a') ?? [];
-    for (const a of links) {
-      const r = a.getBoundingClientRect();
-      const overlaps =
-        r.left < popupRect.right && r.right > popupRect.left && r.top < popupRect.bottom && r.bottom > popupRect.top;
-      if (overlaps) {
-        a.style.pointerEvents = 'none';
-        suppressedLinks.push(a);
+    try {
+      const popupEl = scrollContainer?.querySelector('.highlight-popup');
+      if (!popupEl) return;
+      const popupRect = popupEl.getBoundingClientRect();
+      const links = scrollContainer?.querySelectorAll('.annotationLayer .linkAnnotation a') ?? [];
+      for (const a of links) {
+        const r = a.getBoundingClientRect();
+        const overlaps =
+          r.left < popupRect.right && r.right > popupRect.left && r.top < popupRect.bottom && r.bottom > popupRect.top;
+        if (overlaps) {
+          a.style.pointerEvents = 'none';
+          suppressedLinks.push(a);
+        }
       }
+    } catch (err) {
+      // 링크 무력화는 편의 기능이다 — 실패해도 팝업 자체는 떠야 하므로 삼킨다.
+      console.warn('[PdfViewer] 팝업 아래 링크 무력화 실패', err);
     }
   }
 
   function restoreSuppressedLinks() {
-    for (const a of suppressedLinks) a.style.pointerEvents = '';
+    // 하나가 실패해도(노드가 이미 제거된 경우 등) 나머지는 반드시 되돌린다.
+    const links = suppressedLinks;
     suppressedLinks = [];
+    for (const a of links) {
+      try {
+        a.style.pointerEvents = '';
+      } catch {
+        // 무시 — 이미 사라진 노드다.
+      }
+    }
   }
 
   // 팝업이 열리면(색상 팔레트든 삭제 확인이든) 즉시 겹친 링크를 찾아 무력화하고,
@@ -372,7 +400,9 @@
     if (!pageView?.div || !pageView.viewport) return;
 
     const pageIndex = pageNumber - 1;
-    const items = highlights.filter((h) => h.pageIndex === pageIndex);
+    // rects가 없는(서버 응답이 예상과 다르거나 중간에 깨진) 항목은 그리기에서
+    // 조용히 빼둔다 — 여기서 예외가 나면 아래 $effect 전체가 죽는다.
+    const items = highlights.filter((h) => h.pageIndex === pageIndex && Array.isArray(h.rects) && h.rects.length);
     let layer = highlightLayerOf(pageView);
 
     if (!items.length) {
@@ -409,12 +439,27 @@
     );
   }
 
+  // 페이지 하나가 실패해도 나머지는 계속 그린다. 특히 이 함수는 $effect에서
+  // 불리는데, Svelte 5는 effect 하나가 예외를 던지면 같은 flush에 묶인 다른
+  // effect(팝업 {#if}를 그리는 렌더 effect 포함)까지 함께 중단시킨다 — 그러면
+  // "어느 순간부터 드래그해도 팝업이 안 뜨는" 고착 상태가 된다. 그래서 여기서
+  // 예외가 밖으로 새어 나가지 않게 반드시 가둔다.
+  function safeRenderHighlightLayer(pageNumber) {
+    try {
+      renderHighlightLayer(pageNumber);
+    } catch (err) {
+      console.warn('[PdfViewer] 하이라이트 레이어 렌더 실패', pageNumber, err);
+    }
+  }
+
   function renderAllHighlightLayers() {
-    for (let i = 1; i <= pageViews().length; i += 1) renderHighlightLayer(i);
+    for (let i = 1; i <= pageViews().length; i += 1) safeRenderHighlightLayer(i);
   }
 
   async function loadHighlights() {
     highlights = [];
+    // 다른 논문으로 넘어가면 이전 문서의 임시 key 대응표는 쓸모가 없다.
+    resolvedPendingKeys.clear();
     if (!itemKey) return;
     try {
       highlights = await api.listHighlights(itemKey);
@@ -431,47 +476,54 @@
     const built = [];
 
     for (const pageView of pageViews()) {
-      const textLayerDiv = pageView?.textLayer?.div;
-      if (!textLayerDiv || !pageView.div || !pageView.viewport) continue;
-      if (!range.intersectsNode(textLayerDiv)) continue;
+      // 페이지 하나에서 실패해도(확대/스크롤로 텍스트 레이어가 교체되는 중이라
+      // Range 비교가 WrongDocumentError를 던지는 등) 나머지 페이지는 계속
+      // 처리하고, 무엇보다 예외가 pointerup 밖으로 새어 나가지 않게 한다.
+      try {
+        const textLayerDiv = pageView?.textLayer?.div;
+        if (!textLayerDiv || !pageView.div || !pageView.viewport) continue;
+        if (!range.intersectsNode(textLayerDiv)) continue;
 
-      const pageRange = document.createRange();
-      pageRange.selectNodeContents(textLayerDiv);
+        const pageRange = document.createRange();
+        pageRange.selectNodeContents(textLayerDiv);
 
-      // 선택 범위를 이 페이지 안쪽으로 잘라낸다.
-      const clipped = range.cloneRange();
-      if (clipped.compareBoundaryPoints(Range.START_TO_START, pageRange) < 0) {
-        clipped.setStart(pageRange.startContainer, pageRange.startOffset);
+        // 선택 범위를 이 페이지 안쪽으로 잘라낸다.
+        const clipped = range.cloneRange();
+        if (clipped.compareBoundaryPoints(Range.START_TO_START, pageRange) < 0) {
+          clipped.setStart(pageRange.startContainer, pageRange.startOffset);
+        }
+        if (clipped.compareBoundaryPoints(Range.END_TO_END, pageRange) > 0) {
+          clipped.setEnd(pageRange.endContainer, pageRange.endOffset);
+        }
+        if (clipped.collapsed) continue;
+
+        const text = normalizeText(extractRangeText(clipped));
+        const pageRect = pageView.div.getBoundingClientRect();
+        const scale = visualScale(pageView);
+        const rects = mergeLineRects([...clipped.getClientRects()]).map((rect) =>
+          toPdfRect(rect, pageRect, pageView.viewport, scale)
+        );
+        if (!text || !rects.length) continue;
+
+        // sortIndex의 문자 오프셋 — 페이지 첫 글자부터 선택 시작점까지의 길이.
+        // Zotero 사이드바 정렬용 값이라 같은 페이지 안 순서만 맞으면 충분하다.
+        const beforeRange = document.createRange();
+        beforeRange.setStart(pageRange.startContainer, pageRange.startOffset);
+        beforeRange.setEnd(clipped.startContainer, clipped.startOffset);
+        const offset = extractRangeText(beforeRange).length;
+
+        const pageIndex = pageView.id - 1;
+        const viewBox = pageView.viewport.viewBox ?? [0, 0, 0, 0];
+        built.push({
+          pageIndex,
+          rects,
+          text,
+          pageLabel: pageLabels?.[pageIndex] || String(pageIndex + 1),
+          sortIndex: formatSortIndex(pageIndex, offset, viewBox[3] - rects[0][3]),
+        });
+      } catch (err) {
+        console.warn('[PdfViewer] 선택 영역 해석 실패', err);
       }
-      if (clipped.compareBoundaryPoints(Range.END_TO_END, pageRange) > 0) {
-        clipped.setEnd(pageRange.endContainer, pageRange.endOffset);
-      }
-      if (clipped.collapsed) continue;
-
-      const text = normalizeText(extractRangeText(clipped));
-      const pageRect = pageView.div.getBoundingClientRect();
-      const scale = visualScale(pageView);
-      const rects = mergeLineRects([...clipped.getClientRects()]).map((rect) =>
-        toPdfRect(rect, pageRect, pageView.viewport, scale)
-      );
-      if (!text || !rects.length) continue;
-
-      // sortIndex의 문자 오프셋 — 페이지 첫 글자부터 선택 시작점까지의 길이.
-      // Zotero 사이드바 정렬용 값이라 같은 페이지 안 순서만 맞으면 충분하다.
-      const beforeRange = document.createRange();
-      beforeRange.setStart(pageRange.startContainer, pageRange.startOffset);
-      beforeRange.setEnd(clipped.startContainer, clipped.startOffset);
-      const offset = extractRangeText(beforeRange).length;
-
-      const pageIndex = pageView.id - 1;
-      const viewBox = pageView.viewport.viewBox ?? [0, 0, 0, 0];
-      built.push({
-        pageIndex,
-        rects,
-        text,
-        pageLabel: pageLabels?.[pageIndex] || String(pageIndex + 1),
-        sortIndex: formatSortIndex(pageIndex, offset, viewBox[3] - rects[0][3]),
-      });
     }
 
     return built;
@@ -517,8 +569,14 @@
   }
 
   function onViewerPointerDown(e) {
-    if (isInsidePopup(e)) return;
-    closePopups();
+    try {
+      if (isInsidePopup(e)) return;
+      closePopups();
+    } catch (err) {
+      console.warn('[PdfViewer] 팝업 닫기 실패', err);
+      colorPopup = null;
+      deletePopup = null;
+    }
   }
 
   // 새로 드래그한 선택 전체가 기존 하이라이트 안에 거의 그대로 들어있을 때만
@@ -534,7 +592,9 @@
     for (const item of items) {
       const pageRects = [];
       for (const h of highlights) {
-        if (h.pageIndex !== item.pageIndex) continue;
+        // rects가 없는 항목이 섞여 있어도 여기서 터지면 안 된다 — 이 함수는
+        // pointerup 경로 한복판이라 예외 하나로 팝업이 영영 안 뜨게 된다.
+        if (h?.pageIndex !== item.pageIndex || !Array.isArray(h.rects)) continue;
         for (const hr of h.rects) pageRects.push({ key: h.key, rect: hr });
       }
 
@@ -554,7 +614,26 @@
     return [...keys];
   }
 
+  // 이 핸들러 안에서 어떤 예외가 나도 "다음 드래그는 정상 동작"이어야 한다.
+  // 예외가 밖으로 나가면 브라우저는 그냥 콘솔에만 찍고 넘어가지만, 그 사이
+  // 팝업 상태나 선택 영역이 어중간하게 남아 이후 상호작용이 계속 먹통이
+  // 되는 경우가 있었다 — 실패하면 상태를 깨끗이 초기화하고 끝낸다.
   function onViewerPointerUp(e) {
+    try {
+      handleViewerPointerUp(e);
+    } catch (err) {
+      console.warn('[PdfViewer] 형광펜 상호작용 실패', err);
+      colorPopup = null;
+      deletePopup = null;
+      try {
+        window.getSelection()?.removeAllRanges();
+      } catch {
+        // 무시
+      }
+    }
+  }
+
+  function handleViewerPointerUp(e) {
     if (!itemKey || isInsidePopup(e)) return;
 
     const selection = window.getSelection();
@@ -596,6 +675,11 @@
   // 임시 key -> 저장 요청 Promise(성공 시 서버가 준 항목). 아직 저장 중인
   // 하이라이트를 곧바로 지우려 할 때 진짜 key를 기다리는 데 쓴다.
   const pendingCreations = new Map();
+  // 임시 key -> 저장이 끝난 뒤의 진짜 key(실패했으면 null). 위 Map은 저장이
+  // 끝나면 항목을 지우기 때문에, "저장 중에 열어둔 삭제 팝업"의 버튼을 저장이
+  // 끝난 뒤에 누르면 임시 key를 진짜 key로 못 바꿔 삭제가 조용히 누락됐다
+  // (화면에서만 사라지고 Zotero에는 그대로 남음). 그 대응표는 따로 남긴다.
+  const resolvedPendingKeys = new Map();
 
   // 색상이 정해지는 즉시 임시 하이라이트를 화면에 그리고, Zotero 저장은 뒤에서
   // 진행한다 — API 왕복을 기다리는 동안 아무 반응이 없는 것처럼 보이던 딜레이를
@@ -614,6 +698,13 @@
       const request = api
         .createHighlight(targetItemKey, { ...item, color })
         .then((created) => {
+          // 서버 응답이 예상과 다르면(키 없음/rects 없음) 화면에 넣지 않는다 —
+          // 깨진 항목이 highlights에 들어가면 이후 렌더/재선택 판정이 계속
+          // 예외를 던져 형광펜 상호작용 전체가 고착된다.
+          if (!created?.key || !Array.isArray(created.rects)) {
+            throw new Error('서버가 예상과 다른 응답을 보냈어요');
+          }
+          resolvedPendingKeys.set(pendingKey, created.key);
           // 저장이 끝나기 전에 다른 논문으로 넘어갔다면 화면 갱신은 건너뛴다
           // (진짜 key는 여전히 삭제 대기 쪽에 넘겨줘야 하므로 그대로 반환한다).
           if (itemKey === targetItemKey) {
@@ -622,6 +713,7 @@
           return created;
         })
         .catch((err) => {
+          resolvedPendingKeys.set(pendingKey, null);
           highlights = highlights.filter((h) => h.key !== pendingKey);
           showHighlightError(`하이라이트를 저장하지 못했어요: ${err.message}`);
           return null;
@@ -668,9 +760,12 @@
     let key = highlight.key;
     try {
       if (isPendingKey(key)) {
-        const created = await pendingCreations.get(key);
-        if (!created?.key) return;
-        key = created.key;
+        // 아직 저장 중이면 끝날 때까지 기다리고, 이미 끝났으면 남겨둔 대응표에서
+        // 진짜 key를 찾는다. 저장 자체가 실패했으면(null) 지울 것도 없다.
+        const created = pendingCreations.has(key) ? await pendingCreations.get(key) : null;
+        const realKey = created?.key ?? resolvedPendingKeys.get(key) ?? null;
+        if (!realKey) return;
+        key = realKey;
       }
       await api.deleteHighlight(targetItemKey, key);
     } catch (err) {
@@ -845,7 +940,7 @@
     );
     // 확대/스크롤로 페이지가 다시 그려질 때마다 pdf.js가 페이지 div의 자식을
     // 전부 비우므로(PDFPageView.reset), 우리 하이라이트 레이어도 그때마다 새로 붙인다.
-    eventBus.on('pagerendered', ({ pageNumber }) => renderHighlightLayer(pageNumber), {
+    eventBus.on('pagerendered', ({ pageNumber }) => safeRenderHighlightLayer(pageNumber), {
       signal: eventAbort.signal,
     });
     eventBus.on(
@@ -853,7 +948,7 @@
       ({ pageNumber, error: textLayerError }) => {
         // 텍스트 레이어가 나중에 붙어도 하이라이트가 그 아래로 가도록 순서를
         // 다시 잡아준다(레이어를 지웠다 다시 만들면서 위치가 정해진다).
-        renderHighlightLayer(pageNumber);
+        safeRenderHighlightLayer(pageNumber);
         if (textLayerError) return;
         calibrateTextLayer(pageNumber);
         // textlayerrendered는 임베드 폰트 로딩을 기다리지 않는다 — 캔버스
@@ -915,6 +1010,11 @@
       jumpBack();
     };
 
+    // 참고: 형광펜 상호작용/링크 가로채기용 DOM 리스너는 이 effect가 아니라
+    // 아래 별도 effect에서 등록한다 — 이 effect는 setupDone으로 "한 번만"
+    // 실행되는데, 의존값(scrollContainer/viewerEl)이 나중에 바뀌면 Svelte가
+    // 정리 함수를 먼저 돌리고 본문은 early return 해버려서 리스너가 영영
+    // 사라진다(= 어느 순간부터 드래그해도 팝업이 안 뜨는 고착 상태).
     window.addEventListener('popstate', onPopState);
     // 예전엔 맥에서만 Option+←를 등록했지만(Windows/Linux의 Alt+←가 브라우저
     // 네이티브 뒤로가기와 겹쳐서), 이제 플랫폼 구분 없이 항상 등록한다 —
@@ -922,16 +1022,6 @@
     // capture(true) 단계로 등록해서 앱의 다른 keydown 핸들러보다 먼저 잡는다.
     // 브라우저 뒤로가기로 돌아가는 경로(위 popstate)도 그대로 함께 살아 있다.
     window.addEventListener('keydown', onKeyDown, true);
-    scrollContainer?.addEventListener('click', onLinkClickCapture, true);
-
-    // 형광펜 상호작용: 드래그가 끝나면(pointerup) 새로 선택한 영역을 보고 색상
-    // 팔레트를, 이미 칠한 자리를 겹쳐 드래그했거나 선택 없이 기존 하이라이트를
-    // 눌렀으면 삭제 확인 팝업을 띄운다 — 두 경우 모두 실제 삭제는 그 팝업의
-    // 버튼을 눌러야 실행된다. 팝업 자체는 이 스크롤 컨테이너 밖(position: fixed)에
-    // 있어서 팝업 버튼 클릭이 여기 다시 걸리지 않는다.
-    scrollContainer?.addEventListener('pointerdown', onViewerPointerDown);
-    scrollContainer?.addEventListener('pointerup', onViewerPointerUp);
-    scrollContainer?.addEventListener('scroll', closePopups, { passive: true });
 
     prevSrc = src;
     prevZoom = zoom;
@@ -944,11 +1034,33 @@
       resizeObserver.disconnect();
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown, true);
-      scrollContainer?.removeEventListener('click', onLinkClickCapture, true);
-      scrollContainer?.removeEventListener('pointerdown', onViewerPointerDown);
-      scrollContainer?.removeEventListener('pointerup', onViewerPointerUp);
-      scrollContainer?.removeEventListener('scroll', closePopups);
       eventAbort.abort();
+    };
+  });
+
+  // 형광펜 상호작용: 드래그가 끝나면(pointerup) 새로 선택한 영역을 보고 색상
+  // 팔레트를, 이미 칠한 자리를 겹쳐 드래그했거나 선택 없이 기존 하이라이트를
+  // 눌렀으면 삭제 확인 팝업을 띄운다 — 두 경우 모두 실제 삭제는 그 팝업의
+  // 버튼을 눌러야 실행된다. 팝업 자체는 이 스크롤 컨테이너 밖(position: fixed)에
+  // 있어서 팝업 버튼 클릭이 여기 다시 걸리지 않는다.
+  // 이 리스너들은 위 초기화 effect와 분리해서, scrollContainer가 나중에 다른
+  // 요소로 바뀌어도 항상 "지금의 그 요소"에 다시 붙게 한다. 예전엔 한 번만
+  // 도는 effect 안에 같이 있어서, 그 effect가 재실행되면 정리만 되고 재등록은
+  // 안 돼(setupDone early return) 형광펜이 통째로 죽는 경로가 있었다.
+  $effect(() => {
+    const container = scrollContainer;
+    if (!container) return;
+
+    container.addEventListener('click', onLinkClickCapture, true);
+    container.addEventListener('pointerdown', onViewerPointerDown);
+    container.addEventListener('pointerup', onViewerPointerUp);
+    container.addEventListener('scroll', onViewerScroll, { passive: true });
+
+    return () => {
+      container.removeEventListener('click', onLinkClickCapture, true);
+      container.removeEventListener('pointerdown', onViewerPointerDown);
+      container.removeEventListener('pointerup', onViewerPointerUp);
+      container.removeEventListener('scroll', onViewerScroll);
     };
   });
 </script>
