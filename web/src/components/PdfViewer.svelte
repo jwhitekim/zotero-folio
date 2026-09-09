@@ -182,6 +182,15 @@
     );
     history.pushState({}, '', location.href);
     jumpBackTop = scrollContainer.scrollTop;
+    // 클릭된 링크(<a>)에 포커스가 남으면, 맥에서 그 상태로 Option+←를 눌렀을 때
+    // 브라우저가 ArrowLeft 키다운 이벤트 자체를 페이지 JS까지 보내지 않고
+    // 가로채버린다(altKey:true인 keydown이 전혀 안 옴 — 실측 확인됨). 클릭
+    // 직후 포커스가 실제로 옮겨진 뒤(다음 프레임)에 블러 처리해 이 가로챔을
+    // 피한다 — 클릭 시점에 바로 blur하면 브라우저의 기본 포커스 이동이
+    // 나중에 다시 덮어씌울 수 있다.
+    requestAnimationFrame(() => {
+      if (document.activeElement === link) link.blur();
+    });
   }
 
   // --- 형광펜(하이라이트) ------------------------------------------------
