@@ -5,6 +5,7 @@
   // 계산했는데, 그 수식이 확대 시 비대칭하게 밀리는 등 버그가 반복돼서
   // pdfjs-dist에 이미 포함된 검증된 엔진으로 갈아탔다.
   import '../utils/safari-polyfills.js';
+  import { cubicOut } from 'svelte/easing';
   import * as pdfjsLib from 'pdfjs-dist';
   import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
   import 'pdfjs-dist/web/pdf_viewer.css';
@@ -18,8 +19,7 @@
     formatSortIndex,
     toPdfRect,
     toPageBox,
-    rectArea,
-    rectOverlapArea,
+    coveredWidthRatio,
   } from '../utils/pdf-highlight.js';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -199,8 +199,43 @@
   // "형광펜 지우기" 버튼을 눌러야만 실행된다 — 실수로 지웠을 때 되돌릴 방법이
   // 없어서, 클릭/드래그 어느 경로든 확인 없이 바로 지우지 않게 한다.
   let deletePopup = $state(null); // { keys, x, y, above }
-  let highlightBusy = $state(false);
   let highlightError = $state('');
+
+  // 마지막에 쓴 형광펜 색. Alt(맥은 Option)를 누른 채 드래그를 끝내면 팔레트를
+  // 거치지 않고 이 색으로 바로 칠한다(빠르게 칠하기).
+  // 브라우저를 다시 열어도 같은 색으로 이어지도록
+  // localStorage에 남긴다 — 팔레트에 있는 색인지 한 번 검사해서, 값이 깨졌거나
+  // 팔레트가 바뀐 경우엔 처음처럼 팔레트를 띄운다.
+  const LAST_COLOR_STORAGE_KEY = 'folio:lastHighlightColor';
+
+  function readLastColor() {
+    try {
+      const saved = localStorage.getItem(LAST_COLOR_STORAGE_KEY);
+      return HIGHLIGHT_COLORS.some((c) => c.value === saved) ? saved : null;
+    } catch {
+      return null;
+    }
+  }
+
+  let lastColor = $state(readLastColor());
+
+  // 팔레트 아래에 띄우는 단축키 안내. 맥에서는 같은 키를 Option으로 부르므로
+  // 표기만 바꾼다(위 devicePixelRatio 보정과 같은 방식으로 플랫폼을 읽는다).
+  function isMacPlatform() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
+    return /mac/i.test(platform);
+  }
+
+  const quickPaintHint = `${isMacPlatform() ? 'Option' : 'Alt'}+드래그로 마지막 색 바로 칠하기`;
+
+  function rememberColor(color) {
+    lastColor = color;
+    try {
+      localStorage.setItem(LAST_COLOR_STORAGE_KEY, color);
+    } catch {
+      // 사생활 보호 모드 등으로 저장이 막혀도 이번 세션 동안은 그대로 쓴다.
+    }
+  }
   let pageLabels = null;
   let errorTimer;
 
@@ -213,6 +248,60 @@
   function closePopups() {
     colorPopup = null;
     deletePopup = null;
+  }
+
+  // 색상 팔레트와 삭제 확인 팝업은 동시에 뜨지 않는다 — 어느 쪽을 띄우든
+  // 그 직전 pointerdown이 항상 closePopups()로 둘 다 닫기 때문. 그래서 화면에
+  // 그리는 팝업 요소도 하나만 두고 내용만 바꾼다. 이렇게 해야 아래
+  // suppressLinksUnderPopup()의 querySelector('.highlight-popup')가 언제나
+  // "지금 떠 있는 그 팝업"을 집는다 — 블록을 둘로 나눠두면 퇴장 애니메이션
+  // 때문에 아직 DOM에 남아 있는 옛 팝업이 먼저 잡힐 수 있다.
+  let activePopup = $derived(colorPopup ?? deletePopup);
+
+  // 마크업이 실제로 읽는 팝업 내용은 이 스냅샷이다. activePopup은 닫히는 순간
+  // null이 되는데, 퇴장 트랜지션(popupOut) 동안에도 팝업 요소는 DOM에 남아
+  // 있어서 그 사이에 마크업이 activePopup.x / deletePopup 같은 걸 다시 읽으면
+  // null을 건드리게 된다 — 그러면 삭제 버튼을 눌렀을 때 하이라이트는 지워졌는데
+  // 팝업만 화면에 그대로 남는다. 닫힐 때는 이 스냅샷을 그대로 두어서 퇴장하는
+  // 팝업이 마지막 모습(위치/색/버튼)을 유지한 채 사라지게 한다.
+  let popupView = $state(null); // { kind: 'color' | 'delete', x, y, above }
+
+  function openColorPopup(items, anchor) {
+    colorPopup = { items, ...anchor };
+    popupView = { kind: 'color', ...anchor };
+  }
+
+  function openDeletePopup(keys, anchor) {
+    deletePopup = { keys, ...anchor };
+    popupView = { kind: 'delete', ...anchor };
+  }
+
+  // 팝업 등장/퇴장 모션. 선택 영역 쪽에서 살짝 밀려 나오며 뜨고 같은 궤적으로
+  // 접힌다. 애니메이션은 안쪽 카드(.popup-card)에만 걸고 바깥 래퍼
+  // (.highlight-popup)는 정지 상태로 둔다 — transform은 레이아웃 박스를 바꾸지
+  // 않으므로, 래퍼의 getBoundingClientRect()는 애니메이션 중에도 항상 최종
+  // 위치/크기 그대로다. suppressLinksUnderPopup()이 그 사각형으로 겹친 참고문헌
+  // 링크를 찾으므로 이 조건이 깨지면 안 된다.
+  function popupMotion({ above = true, closing = false } = {}) {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    return {
+      duration: reduced ? 0 : closing ? 110 : 170,
+      easing: cubicOut,
+      css: (t, u) =>
+        `opacity: ${t};` +
+        `transform: translateY(${(u * (above ? 6 : -6)).toFixed(2)}px) scale(${(0.94 + 0.06 * t).toFixed(4)});` +
+        // 닫히는 중인 팝업은 사라질 때까지 DOM에 남아 있으므로, 그 동안 클릭을
+        // 가로채지 않도록 포인터 이벤트를 꺼둔다.
+        (closing ? 'pointer-events: none;' : ''),
+    };
+  }
+
+  function popupIn(node, params) {
+    return popupMotion(params);
+  }
+
+  function popupOut(node, params) {
+    return popupMotion({ ...params, closing: true });
   }
 
   // 형광펜 팝업(색상 선택/삭제 확인)과 화면상 겹치는 참고문헌 링크는, 팝업이
@@ -437,33 +526,36 @@
   // 단어를 포함해서 더 큰 문장을 새로 드래그하는 것처럼 선택이 하이라이트 밖으로
   // 삐져나가면(부분 겹침) 지우기가 아니라 새 하이라이트로 취급한다 — 사용자가
   // 다른/더 넓은 범위를 칠하려던 걸 실수로 지워버리면 안 되기 때문.
-  function findReselectedHighlights(items, threshold = 0.9) {
+  function findReselectedHighlights(items, threshold = 0.8) {
     const keys = new Set();
-    let coveredArea = 0;
-    let totalArea = 0;
+    let coveredWidth = 0;
+    let totalWidth = 0;
 
     for (const item of items) {
+      const pageRects = [];
+      for (const h of highlights) {
+        if (h.pageIndex !== item.pageIndex) continue;
+        for (const hr of h.rects) pageRects.push({ key: h.key, rect: hr });
+      }
+
       for (const rect of item.rects) {
-        totalArea += rectArea(rect);
-        for (const h of highlights) {
-          if (h.pageIndex !== item.pageIndex) continue;
-          for (const hr of h.rects) {
-            const overlap = rectOverlapArea(rect, hr);
-            if (overlap > 0) {
-              coveredArea += overlap;
-              keys.add(h.key);
-            }
-          }
-        }
+        const width = Math.max(0, rect[2] - rect[0]);
+        if (width <= 0) continue;
+        totalWidth += width;
+
+        const near = pageRects.filter((entry) => coveredWidthRatio(rect, [entry.rect]) > 0);
+        if (!near.length) continue;
+        for (const entry of near) keys.add(entry.key);
+        coveredWidth += width * coveredWidthRatio(rect, near.map((entry) => entry.rect));
       }
     }
 
-    if (!keys.size || totalArea <= 0 || coveredArea / totalArea < threshold) return [];
+    if (!keys.size || totalWidth <= 0 || coveredWidth / totalWidth < threshold) return [];
     return [...keys];
   }
 
   function onViewerPointerUp(e) {
-    if (!itemKey || highlightBusy || isInsidePopup(e)) return;
+    if (!itemKey || isInsidePopup(e)) return;
 
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -471,57 +563,120 @@
       const items = buildHighlightsFromRange(range);
       if (items.length) {
         const reselected = findReselectedHighlights(items);
+        const anchor = popupAnchor(range.getBoundingClientRect());
         if (reselected.length) {
-          deletePopup = { keys: reselected, ...popupAnchor(range.getBoundingClientRect()) };
+          openDeletePopup(reselected, anchor);
+        } else if (e.altKey && lastColor) {
+          // 빠르게 칠하기 — Alt(맥은 Option)를 누른 채 드래그를 끝내면 팔레트를
+          // 거치지 않고 마지막에 쓴 색으로 바로 칠한다. 그냥 드래그하는 건 복사
+          // 같은 다른 목적일 수 있으므로 기본값은 팔레트를 띄우는 쪽이다.
+          window.getSelection()?.removeAllRanges();
+          paintHighlights(items, lastColor);
         } else {
-          colorPopup = { items, ...popupAnchor(range.getBoundingClientRect()) };
+          openColorPopup(items, anchor);
         }
         return;
       }
     }
 
     const hit = findHighlightAt(e.clientX, e.clientY);
-    deletePopup = hit ? { keys: [hit.key], ...popupAnchor(hit.rect) } : null;
+    if (hit) openDeletePopup([hit.key], popupAnchor(hit.rect));
+    else deletePopup = null;
   }
 
-  async function createHighlight(color) {
+  // 낙관적 UI로 먼저 그려둔, 아직 Zotero에 저장되지 않은 하이라이트의 임시 key.
+  // Zotero annotation key는 영문 대문자+숫자 8자라 이 접두사와 겹치지 않는다.
+  const PENDING_KEY_PREFIX = 'pending:';
+  let pendingKeySeq = 0;
+
+  function isPendingKey(key) {
+    return typeof key === 'string' && key.startsWith(PENDING_KEY_PREFIX);
+  }
+
+  // 임시 key -> 저장 요청 Promise(성공 시 서버가 준 항목). 아직 저장 중인
+  // 하이라이트를 곧바로 지우려 할 때 진짜 key를 기다리는 데 쓴다.
+  const pendingCreations = new Map();
+
+  // 색상이 정해지는 즉시 임시 하이라이트를 화면에 그리고, Zotero 저장은 뒤에서
+  // 진행한다 — API 왕복을 기다리는 동안 아무 반응이 없는 것처럼 보이던 딜레이를
+  // 없애기 위해서다. 성공하면 서버가 준 진짜 항목으로 교체하고, 실패하면 임시
+  // 항목을 걷어낸 뒤 에러를 띄운다. 페이지별 item은 서로 독립적으로 처리해서
+  // 하나가 실패해도 나머지는 남는다.
+  function paintHighlights(items, color) {
+    if (!items.length || !itemKey) return;
+    rememberColor(color);
+
+    const targetItemKey = itemKey;
+    for (const item of items) {
+      const pendingKey = `${PENDING_KEY_PREFIX}${++pendingKeySeq}`;
+      highlights = [...highlights, { ...item, color, key: pendingKey }];
+
+      const request = api
+        .createHighlight(targetItemKey, { ...item, color })
+        .then((created) => {
+          // 저장이 끝나기 전에 다른 논문으로 넘어갔다면 화면 갱신은 건너뛴다
+          // (진짜 key는 여전히 삭제 대기 쪽에 넘겨줘야 하므로 그대로 반환한다).
+          if (itemKey === targetItemKey) {
+            highlights = highlights.map((h) => (h.key === pendingKey ? created : h));
+          }
+          return created;
+        })
+        .catch((err) => {
+          highlights = highlights.filter((h) => h.key !== pendingKey);
+          showHighlightError(`하이라이트를 저장하지 못했어요: ${err.message}`);
+          return null;
+        })
+        .finally(() => pendingCreations.delete(pendingKey));
+
+      pendingCreations.set(pendingKey, request);
+    }
+  }
+
+  function createHighlight(color) {
     const items = colorPopup?.items ?? [];
     closePopups();
     window.getSelection()?.removeAllRanges();
-    if (!items.length || !itemKey) return;
-
-    highlightBusy = true;
-    try {
-      for (const item of items) {
-        const created = await api.createHighlight(itemKey, { ...item, color });
-        highlights = [...highlights, created];
-      }
-    } catch (err) {
-      showHighlightError(`하이라이트를 저장하지 못했어요: ${err.message}`);
-    } finally {
-      highlightBusy = false;
-    }
+    paintHighlights(items, color);
   }
 
   // 삭제 확인 팝업의 "형광펜 지우기" 버튼을 눌렀을 때만 실행된다 — 클릭으로
   // 하나를 지우든, 겹쳐 드래그해서 여러 개를 지우든 실제 삭제 경로는 이 한
   // 곳뿐이다(keys는 항상 1개 이상).
-  async function removeHighlight() {
+  // 칠하기와 마찬가지로 낙관적으로 처리한다 — 화면에서 먼저 지우고 Zotero 삭제는
+  // 뒤에서 진행한다. 응답을 기다리는 동안 상호작용을 묶어두지 않으므로, 지운
+  // 직후에도 바로 다른 곳을 칠하거나 지울 수 있다.
+  function removeHighlight() {
     const keys = deletePopup?.keys ?? [];
     closePopups();
     window.getSelection()?.removeAllRanges();
     if (!keys.length || !itemKey) return;
 
-    highlightBusy = true;
+    const targetItemKey = itemKey;
+    const removed = highlights.filter((h) => keys.includes(h.key));
+    highlights = highlights.filter((h) => !keys.includes(h.key));
+
+    for (const highlight of removed) {
+      deleteHighlightWhenSaved(targetItemKey, highlight);
+    }
+  }
+
+  // 아직 저장 중인(임시 key) 하이라이트를 지우려는 경우엔 저장이 끝나 진짜 key를
+  // 받을 때까지 기다렸다가 삭제한다 — 서버에 없는 key로 DELETE를 보내지 않기
+  // 위해서다. 저장 자체가 실패했다면(항목이 이미 화면에서 사라진 상태) 지울
+  // 것도 없으므로 그냥 끝낸다.
+  async function deleteHighlightWhenSaved(targetItemKey, highlight) {
+    let key = highlight.key;
     try {
-      for (const key of keys) {
-        await api.deleteHighlight(itemKey, key);
+      if (isPendingKey(key)) {
+        const created = await pendingCreations.get(key);
+        if (!created?.key) return;
+        key = created.key;
       }
-      highlights = highlights.filter((h) => !keys.includes(h.key));
+      await api.deleteHighlight(targetItemKey, key);
     } catch (err) {
+      // 실패한 것만 되돌린다 (여러 개를 한 번에 지울 때 나머지는 그대로 둔다).
+      if (itemKey === targetItemKey) highlights = [...highlights, { ...highlight, key }];
       showHighlightError(`하이라이트를 지우지 못했어요: ${err.message}`);
-    } finally {
-      highlightBusy = false;
     }
   }
 
@@ -824,38 +979,65 @@
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
 ></div>
 
-<!-- 형광펜 팝업 2종. 스크롤 컨테이너 안쪽에 있으면 잘려나가므로 position: fixed로
+<!-- 형광펜 팝업. 스크롤 컨테이너 안쪽에 있으면 잘려나가므로 position: fixed로
      띄운다 — .pdfViewer(확대 미리보기 transform이 걸리는 요소)의 자식이 아니라
-     형제라서 transform의 영향도 받지 않는다. -->
-{#if colorPopup}
+     형제라서 transform의 영향도 받지 않는다.
+     바깥 .highlight-popup은 위치만 잡는 래퍼고(애니메이션 없음), 실제 카드
+     모양과 등장/퇴장 모션은 안쪽 .popup-card가 갖는다 — suppressLinksUnderPopup()이
+     재는 사각형을 애니메이션 중에도 최종 크기로 유지하기 위한 구조다. -->
+{#if activePopup && popupView}
   <div
     class="highlight-popup"
-    style:left={`${colorPopup.x}px`}
-    style:top={`${colorPopup.y}px`}
-    style:transform={colorPopup.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'}
-    role="toolbar"
-    aria-label="형광펜 색상"
+    style:left={`${popupView.x}px`}
+    style:top={`${popupView.y}px`}
+    style:transform={popupView.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'}
   >
-    {#each HIGHLIGHT_COLORS as color (color.value)}
-      <button
-        class="highlight-swatch"
-        style:background={color.value}
-        title={`${color.label} 형광펜`}
-        aria-label={`${color.label} 형광펜으로 칠하기`}
-        onclick={() => createHighlight(color.value)}
-      ></button>
-    {/each}
-  </div>
-{/if}
-
-{#if deletePopup}
-  <div
-    class="highlight-popup"
-    style:left={`${deletePopup.x}px`}
-    style:top={`${deletePopup.y}px`}
-    style:transform={deletePopup.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'}
-  >
-    <button class="highlight-delete" onclick={removeHighlight}>형광펜 지우기</button>
+    <div
+      class="popup-card"
+      class:is-below={!popupView.above}
+      class:is-danger={popupView.kind === 'delete'}
+      class:has-hint={popupView.kind === 'color' && !!lastColor}
+      style:transform-origin={popupView.above ? '50% 100%' : '50% 0%'}
+      in:popupIn={{ above: popupView.above }}
+      out:popupOut={{ above: popupView.above }}
+    >
+      {#if popupView.kind === 'color'}
+        <div class="popup-swatches" role="toolbar" aria-label="형광펜 색상">
+          {#each HIGHLIGHT_COLORS as color (color.value)}
+            <button
+              class="highlight-swatch"
+              style:--swatch-color={color.value}
+              title={`${color.label} 형광펜`}
+              aria-label={`${color.label} 형광펜으로 칠하기`}
+              onclick={() => createHighlight(color.value)}
+            ></button>
+          {/each}
+        </div>
+        <!-- 마지막 색을 아직 모르는 첫 사용 때는 안내해도 쓸 수 없으므로 감춘다. -->
+        {#if lastColor}
+          <p class="popup-hint">{quickPaintHint}</p>
+        {/if}
+      {:else}
+        <button class="highlight-delete" onclick={removeHighlight}>
+          <svg
+            class="highlight-delete-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.9"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 7h16" />
+            <path d="M9.5 7V5.4A1.4 1.4 0 0 1 10.9 4h2.2a1.4 1.4 0 0 1 1.4 1.4V7" />
+            <path d="M6.5 7l.8 11.6A1.5 1.5 0 0 0 8.8 20h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7" />
+            <path d="M10.4 10.8v5.6M13.6 10.8v5.6" />
+          </svg>
+          형광펜 지우기
+        </button>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -900,42 +1082,185 @@
     mix-blend-mode: multiply;
   }
 
+  /* 위치만 잡는 래퍼 — 여기엔 애니메이션도 여백도 없다. 그래야 이 요소의
+     사각형이 곧 카드의 최종 크기/위치가 되고, suppressLinksUnderPopup()이
+     겹친 참고문헌 링크를 정확히 찾아낸다. 클릭은 안쪽 카드만 받는다. */
   .highlight-popup {
+    --popup-bg: var(--surface);
+    --popup-border: var(--border);
+    --popup-shadow: 0 1px 2px rgba(77, 47, 33, 0.07), 0 3px 8px -3px rgba(77, 47, 33, 0.14),
+      0 14px 30px -8px rgba(77, 47, 33, 0.28);
+    --swatch-ring: rgba(0, 0, 0, 0.16);
     position: fixed;
     z-index: 40;
+    pointer-events: none;
+  }
+
+  .popup-card {
+    position: relative;
     display: flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.32rem;
+    border: 1px solid var(--popup-border);
+    border-radius: 13px;
+    background: var(--popup-bg);
+    box-shadow: var(--popup-shadow);
+    pointer-events: auto;
+  }
+
+  /* 단축키 안내가 붙는 색상 팔레트만 세로로 쌓는다 — 삭제 확인 팝업은 기존
+     그대로 한 줄이다. */
+  .popup-card.has-hint {
+    flex-direction: column;
+    align-items: stretch;
     gap: 0.3rem;
-    padding: 0.3rem;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface);
-    box-shadow: var(--shadow-sm), 0 6px 20px rgba(77, 47, 33, 0.18);
+    padding-bottom: 0.28rem;
+  }
+
+  .popup-swatches {
+    display: flex;
+    align-items: center;
+    gap: 0.28rem;
+  }
+
+  /* 존재만 알아챌 수 있으면 되는 보조 문구라, 눈에 띄지 않게 작고 흐리게 둔다. */
+  .popup-hint {
+    margin: 0;
+    text-align: center;
+    font-size: 0.66rem;
+    line-height: 1.2;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* 선택 영역을 가리키는 꼬리. popupAnchor()가 선택 영역과 팝업 사이에 8px을
+     띄워두므로 그 틈에 들어간다. position: absolute라 카드의 레이아웃 박스는
+     그대로다(= 래퍼 사각형에 영향 없음). */
+  .popup-card::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--popup-border);
+    border-top: 0;
+    border-left: 0;
+    border-bottom-right-radius: 2px;
+    background: var(--popup-bg);
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  /* 팝업이 선택 영역 아래에 뜨는 경우엔 꼬리도 위쪽을 향한다. */
+  .popup-card.is-below::after {
+    top: -6px;
+    bottom: auto;
+    border: 1px solid var(--popup-border);
+    border-bottom: 0;
+    border-right: 0;
+    border-bottom-right-radius: 0;
+    border-top-left-radius: 2px;
+  }
+
+  /* 삭제 확인 팝업은 "되돌릴 수 없는 동작"이라는 게 한눈에 보이도록
+     카드 자체를 위험 색으로 물들인다. */
+  .popup-card.is-danger {
+    --popup-bg: color-mix(in srgb, var(--danger-soft) 62%, var(--surface));
+    --popup-border: color-mix(in srgb, var(--danger) 34%, var(--border));
   }
 
   .highlight-swatch {
-    width: 22px;
-    height: 22px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 6px;
-    transition: transform 140ms ease;
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--swatch-color);
+    box-shadow:
+      inset 0 0 0 1px var(--swatch-ring),
+      0 1px 2px rgba(77, 47, 33, 0.16);
+    transition:
+      transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1),
+      box-shadow 160ms ease;
   }
 
-  .highlight-swatch:hover {
-    transform: scale(1.12);
+  .highlight-swatch:hover,
+  .highlight-swatch:focus-visible {
+    transform: translateY(-1px) scale(1.16);
+    box-shadow:
+      inset 0 0 0 1px var(--swatch-ring),
+      0 4px 10px -2px rgba(77, 47, 33, 0.35);
+  }
+
+  .highlight-swatch:active {
+    transform: translateY(0) scale(1.02);
   }
 
   .highlight-delete {
-    padding: 0.25rem 0.55rem;
-    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.55rem 0.3rem 0.45rem;
+    border-radius: 9px;
     background: transparent;
-    color: var(--text-soft);
-    font-size: 0.72rem;
+    color: var(--danger);
+    font-size: 0.74rem;
     font-weight: 600;
+    transition:
+      background 140ms ease,
+      transform 140ms ease;
+  }
+
+  .highlight-delete-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
   }
 
   .highlight-delete:hover {
-    background: var(--accent-pale);
-    color: var(--accent);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+
+  .highlight-delete:active {
+    background: color-mix(in srgb, var(--danger) 22%, transparent);
+    transform: scale(0.98);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .highlight-popup {
+      --popup-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 3px 10px -3px rgba(0, 0, 0, 0.45),
+        0 16px 34px -8px rgba(0, 0, 0, 0.6);
+      --swatch-ring: rgba(255, 255, 255, 0.28);
+    }
+
+    .highlight-swatch {
+      box-shadow:
+        inset 0 0 0 1px var(--swatch-ring),
+        0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+
+    .highlight-swatch:hover,
+    .highlight-swatch:focus-visible {
+      box-shadow:
+        inset 0 0 0 1px var(--swatch-ring),
+        0 4px 12px -2px rgba(0, 0, 0, 0.6);
+    }
+  }
+
+  /* 모션을 줄이도록 설정한 환경에서는 hover/active의 움직임도 없앤다
+     (등장/퇴장 트랜지션은 popupMotion()이 duration 0으로 처리한다). */
+  @media (prefers-reduced-motion: reduce) {
+    .highlight-swatch,
+    .highlight-delete {
+      transition: none;
+    }
+
+    .highlight-swatch:hover,
+    .highlight-swatch:focus-visible,
+    .highlight-swatch:active,
+    .highlight-delete:active {
+      transform: none;
+    }
   }
 
   .highlight-error {

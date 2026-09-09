@@ -83,18 +83,43 @@ export function rectsOverlap(a, b) {
   return a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 }
 
-// 사각형 넓이. 폭/높이가 음수가 나올 일은 없지만(항상 min/max로 정규화된
-// 값을 넣음) 방어적으로 0 미만은 잘라낸다.
-export function rectArea(r) {
-  return Math.max(0, r[2] - r[0]) * Math.max(0, r[3] - r[1]);
-}
+// 새로 드래그한 사각형 하나가 기존 하이라이트 사각형들에 "가로로 얼마나
+// 덮였는지"(0~1)를 낸다. 넓이 비율 대신 가로 길이 비율을 쓰는 이유:
+// 같은 줄이라도 사각형 높이가 서로 다르게 잡히는 경우가 많다 — pdf.js
+// 텍스트 레이어 선택 rect는 줄 상자 전체 높이인 반면, Zotero 데스크톱에서
+// 칠한 하이라이트는 글자 높이에 가깝게 저장된다. 그러면 실제로는 같은 구간을
+// 다시 칠했는데도 넓이 비율이 0.5 언저리로 떨어져 "재선택=지우기" 판정을
+// 통과하지 못한다. 세로는 "같은 줄인가"만 보고(겹침이 낮은 쪽 높이의 절반
+// 이상), 실제 판정은 가로 구간 합집합으로 한다.
+export function coveredWidthRatio(rect, others) {
+  const width = rect[2] - rect[0];
+  if (width <= 0) return 0;
 
-// 두 사각형이 겹치는 부분의 넓이. rectsOverlap이 "닿았는지"만 보는 것과
-// 달리, "얼마나" 겹쳤는지가 필요한 재선택(=지우기) 판정에 쓴다.
-export function rectOverlapArea(a, b) {
-  const w = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
-  const h = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-  return w * h;
+  const spans = [];
+  for (const other of others) {
+    const vOverlap = Math.min(rect[3], other[3]) - Math.max(rect[1], other[1]);
+    const minHeight = Math.min(rect[3] - rect[1], other[3] - other[1]);
+    if (minHeight <= 0 || vOverlap <= minHeight * 0.5) continue;
+    const left = Math.max(rect[0], other[0]);
+    const right = Math.min(rect[2], other[2]);
+    if (right > left) spans.push([left, right]);
+  }
+  if (!spans.length) return 0;
+
+  // 겹치는 구간을 두 번 세지 않도록 합집합 길이로 계산한다.
+  spans.sort((a, b) => a[0] - b[0]);
+  let covered = 0;
+  let [start, end] = spans[0];
+  for (const [s, e] of spans.slice(1)) {
+    if (s > end) {
+      covered += end - start;
+      [start, end] = [s, e];
+    } else if (e > end) {
+      end = e;
+    }
+  }
+  covered += end - start;
+  return Math.min(1, covered / width);
 }
 
 // 화면 좌표(DOMRect)를 PDF 사용자 좌표(좌하단 원점, pt)로 바꾼다.
