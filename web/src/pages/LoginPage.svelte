@@ -8,7 +8,10 @@
   <section class="login-story">
     <div class="login-brand">
       <span class="folio-logo"><Icon name="library" size={23} strokeWidth={1.7} /></span>
-      <strong>Folio</strong>
+      <div class="login-brand-text">
+        <strong>Folio</strong>
+        <span class="login-brand-sub">Zotero용 개인 논문 읽기·메모 공간</span>
+      </div>
     </div>
 
     <div class="login-message">

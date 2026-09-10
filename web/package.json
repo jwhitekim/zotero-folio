@@ -2,6 +2,7 @@
   "name": "web",
   "private": true,
   "version": "0.0.0",
+  "description": "Folio 웹 UI — Zotero용 개인 논문 읽기·메모 공간 (Svelte + Vite)",
   "type": "module",
   "scripts": {
     "dev": "vite",

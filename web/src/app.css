@@ -244,10 +244,21 @@ main:not(.reading-mode):not(.login-mode) {
   backdrop-filter: blur(10px);
 }
 
+.login-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
 .login-brand strong {
   font-family: var(--font-serif);
   font-size: 1.3rem;
   letter-spacing: -0.025em;
+}
+
+.login-brand-sub {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .login-message {
