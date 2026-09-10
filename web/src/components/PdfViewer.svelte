@@ -989,48 +989,12 @@
     });
     resizeObserver.observe(scrollContainer);
 
-    // 참고문헌 링크로 점프하기 전 위치를 history state에 남겨두므로
-    // (onLinkClickCapture 참고), 뒤로가기 시 그 위치로 돌아간다.
-    const onPopState = (e) => {
-      if (typeof e.state?.pdfScrollTop !== 'number') return;
-      scrollContainer?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
-      jumpBackTop = null;
-    };
-    // Alt+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌 점프 전
-    // 위치로 돌아가는 전용 단축키. 맥(Option+←)/Windows/Linux 구분 없이 전
-    // 플랫폼에서 동일하게 동작한다. Windows/Linux에서 Alt+←는 브라우저
-    // 네이티브 뒤로가기 기본 동작이기도 한데, keydown의 기본 동작이라
-    // preventDefault()로 취소할 수 있다 — 아래에서 preventDefault()와
-    // stopPropagation()을 함께 걸고, 리스너도 capture 단계에 등록해서 앱의
-    // 다른 keydown 핸들러보다 먼저 이 이벤트를 소비한다.
-    // e.key로 판별한다 — 메인 키보드 화살표와, NumLock이 꺼진 넘패드 4가
-    // 둘 다 'ArrowLeft'로 들어와 어느 쪽으로 눌러도 같게 동작한다.
-    // 입력창/메모 에디터에 포커스가 있을 때는 가로채지 않는다(타이핑을
-    // 방해하면 안 되므로). 돌아갈 위치가 없으면(jumpBackTop == null)
-    // 가로채지 않고 그대로 흘려보내, 브라우저 네이티브 뒤로가기가 평소대로
-    // 동작하게 둔다.
-    const onKeyDown = (e) => {
-      if (e.key !== 'ArrowLeft' || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
-      const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-      if (jumpBackTop == null) return;
-      e.preventDefault();
-      e.stopPropagation();
-      jumpBack();
-    };
-
-    // 참고: 형광펜 상호작용/링크 가로채기용 DOM 리스너는 이 effect가 아니라
-    // 아래 별도 effect에서 등록한다 — 이 effect는 setupDone으로 "한 번만"
-    // 실행되는데, 의존값(scrollContainer/viewerEl)이 나중에 바뀌면 Svelte가
-    // 정리 함수를 먼저 돌리고 본문은 early return 해버려서 리스너가 영영
-    // 사라진다(= 어느 순간부터 드래그해도 팝업이 안 뜨는 고착 상태).
-    window.addEventListener('popstate', onPopState);
-    // 예전엔 맥에서만 Option+←를 등록했지만(Windows/Linux의 Alt+←가 브라우저
-    // 네이티브 뒤로가기와 겹쳐서), 이제 플랫폼 구분 없이 항상 등록한다 —
-    // 네이티브 뒤로가기는 위 onKeyDown의 preventDefault()로 억제한다.
-    // capture(true) 단계로 등록해서 앱의 다른 keydown 핸들러보다 먼저 잡는다.
-    // 브라우저 뒤로가기로 돌아가는 경로(위 popstate)도 그대로 함께 살아 있다.
-    window.addEventListener('keydown', onKeyDown, true);
+    // 참고: popstate/keydown(Alt+←) 리스너는 이 effect가 아니라 아래 별도
+    // effect에서 등록한다 — 이 effect는 setupDone으로 "한 번만" 실행되는데,
+    // 의존값(scrollContainer/viewerEl)이 나중에 바뀌면 Svelte가 정리 함수를
+    // 먼저 돌리고 본문은 early return 해버려서 리스너가 영영 사라진다
+    // (= 어느 순간부터 Alt+←를 눌러도 반응이 없는 고착 상태). 형광펜 리스너도
+    // 같은 이유로 아래에서 별도 effect로 등록한다.
 
     prevSrc = src;
     prevZoom = zoom;
@@ -1041,9 +1005,54 @@
       clearTimeout(zoomTimer);
       clearTimeout(errorTimer);
       resizeObserver.disconnect();
+      eventAbort.abort();
+    };
+  });
+
+  // 참고문헌 링크로 점프하기 전 위치를 history state에 남겨두므로
+  // (onLinkClickCapture 참고), 뒤로가기 시 그 위치로 돌아간다.
+  function onPopState(e) {
+    if (typeof e.state?.pdfScrollTop !== 'number') return;
+    scrollContainer?.scrollTo({ top: e.state.pdfScrollTop, behavior: 'auto' });
+    jumpBackTop = null;
+  }
+  // Alt+← : 브라우저 전체 이동이 아니라 이 PDF 안에서 참고문헌 점프 전
+  // 위치로 돌아가는 전용 단축키. 맥(Option+←)/Windows/Linux 구분 없이 전
+  // 플랫폼에서 동일하게 동작한다. Windows/Linux에서 Alt+←는 브라우저
+  // 네이티브 뒤로가기 기본 동작이기도 한데, keydown의 기본 동작이라
+  // preventDefault()로 취소할 수 있다 — 아래에서 preventDefault()와
+  // stopPropagation()을 함께 걸고, 리스너도 capture 단계에 등록해서 앱의
+  // 다른 keydown 핸들러보다 먼저 이 이벤트를 소비한다.
+  // e.key로 판별한다 — 메인 키보드 화살표와, NumLock이 꺼진 넘패드 4가
+  // 둘 다 'ArrowLeft'로 들어와 어느 쪽으로 눌러도 같게 동작한다.
+  // 입력창/메모 에디터에 포커스가 있을 때는 가로채지 않는다(타이핑을
+  // 방해하면 안 되므로). 돌아갈 위치가 없으면(jumpBackTop == null)
+  // 가로채지 않고 그대로 흘려보내, 브라우저 네이티브 뒤로가기가 평소대로
+  // 동작하게 둔다.
+  function onKeyDown(e) {
+    if (e.key !== 'ArrowLeft' || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+    if (jumpBackTop == null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    jumpBack();
+  }
+
+  // scrollContainer/viewerEl과 무관하게 마운트 시 한 번만 등록되고 언마운트
+  // 시에만 해제된다 — 위 setupDone effect처럼 도중에 재실행돼 리스너가
+  // 사라지는 일이 없다(이 effect 본문은 어떤 반응형 값도 읽지 않는다).
+  $effect(() => {
+    // 예전엔 맥에서만 Option+←를 등록했지만(Windows/Linux의 Alt+←가 브라우저
+    // 네이티브 뒤로가기와 겹쳐서), 이제 플랫폼 구분 없이 항상 등록한다 —
+    // 네이티브 뒤로가기는 위 onKeyDown의 preventDefault()로 억제한다.
+    // capture(true) 단계로 등록해서 앱의 다른 keydown 핸들러보다 먼저 잡는다.
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('keydown', onKeyDown, true);
+
+    return () => {
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown, true);
-      eventAbort.abort();
     };
   });
 
