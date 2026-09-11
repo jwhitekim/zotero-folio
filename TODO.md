@@ -3,6 +3,7 @@
 ## 진행 중
 
 ## 완료
+- [x] 3번-3: 노트 바텀시트 전환(폰+세로 태블릿, 탭 전환 완전 대체) — 새 `NoteBottomSheet.svelte`(접힘/중간/완전펼침 3단 스냅, 드래그+탭+키보드 토글), `PaperDetailSplit.svelte`에서 `mobilePane`/탭 UI 제거하고 matchMedia로 데스크톱 분할뷰와 분기. 데스크톱/가로 태블릿 분할뷰는 미변경. 빌드 통과, `77bb00b` 푸시 완료. 실기기 드래그 체감 확인 필요
 - [x] 3번-2: 하이라이트 팝업 터치 타겟 점검 — `@media (pointer: coarse)`로 터치 환경에서만 스와치 25→44px, 삭제 버튼 min-height 44px 등으로 확대, 데스크톱 마우스 크기는 그대로 유지. 빌드 통과, `3b61a60` 푸시 완료
 - [x] 3번-1: 태블릿 가로모드 분할뷰 브레이크포인트 조정 — `orientation: portrait` 조건 추가해 아이패드 Pro 12.9" 세로(폭 1024px) 사각지대 해결, 가로 태블릿/데스크톱은 분할뷰 그대로 유지. 빌드 통과, `da28bbb` 푸시 완료
 - [x] 태블릿 PDF 핀치 확대/축소 + 한 손가락 팬 구현 — `touch-action: none`으로 전환해 네이티브 팬과 JS 확대 보정이 경합하던 근본 원인 제거(`docs/pdf-touch-pinch-zoom.md`), 손가락 1개/2개를 하나의 핸들러(`touch-gestures.js`)로 통합 처리, 형광펜 드래그는 `window.getSelection()` 재사용으로 구분. 실기기(태블릿)에서 사용자 확인 완료, `4faf9d7` 푸시 완료
@@ -12,5 +13,4 @@
 - [x] Alt+← 단축키 리스너가 쓰다가 꺼지는 버그 원인 파악 — `PdfViewer.svelte`의 `setupDone` 게이트 `$effect`(874~1048줄) 안에 `popstate`/`keydown`(Alt+←) 리스너가 등록돼 있는데, 이 effect가 읽는 `scrollContainer`/`viewerEl`이 나중에 바뀌면 Svelte가 cleanup만 실행하고 본문은 `setupDone` 때문에 early return 해 리스너가 재등록되지 않음. 형광펜 리스너는 이미 같은 이유로 별도 effect로 분리돼 있으나(1059줄 근처) Alt+← 리스너는 아직 그대로 남아 같은 버그를 가짐. 수정 여부는 사용자 확인 대기
 
 ## 보류 (사용자 확인 필요)
-- [?] 3번-3: 노트 바텀시트 전환 (범위/방식 확인 대기 — 사용자에게 질문함)
 - [?] Zotero ink annotation 실제 데이터 형식 확인 (사용자가 Zotero 데스크톱에서 샘플 ink 생성해줄 때까지 대기)
