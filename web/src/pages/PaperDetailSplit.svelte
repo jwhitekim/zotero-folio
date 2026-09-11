@@ -5,6 +5,7 @@
   import { api } from '../services/api.js';
   import PdfPane from '../components/PdfPane.svelte';
   import MarkdownNote from '../components/MarkdownNote.svelte';
+  import NoteBottomSheet from '../components/NoteBottomSheet.svelte';
   import Icon from '../components/Icon.svelte';
 
   let { itemKey, onBack, backLabel = '라이브러리' } = $props();
@@ -12,8 +13,22 @@
   let paper = $state(null);
   let loading = $state(true);
   let error = $state('');
-  let mobilePane = $state('pdf');
   let noteCollapsed = $state(false);
+
+  // 모바일(폰 + 세로모드 태블릿) 판정. 이 조건에서만 노트를 바텀시트로
+  // 띄우고, 분할뷰의 노트 패널/리사이저는 렌더하지 않는다. 데스크톱/가로
+  // 태블릿은 기존 분할뷰(.split-view)를 그대로 쓴다. 브레이크포인트는
+  // app.css의 모바일 레이아웃 조건과 동일하게 맞춘다.
+  const MOBILE_QUERY = '(max-width: 900px), (orientation: portrait) and (max-width: 1024px)';
+  let isMobile = $state(false);
+
+  $effect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const update = () => (isMobile = mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  });
 
   // 원문/노트 패널 구분선 드래그로 폭 조절. splitViewEl(그리드 컨테이너)의
   // 실제 렌더 폭을 기준으로 매 드래그마다 clamp하므로, 창 크기가 좁아져도
@@ -88,16 +103,11 @@
   {:else if error}
     <div class="reader-loading"><div class="state-card error-state"><Icon name="alert" size={25} /><strong>논문을 불러오지 못했어요</strong><p>{error}</p></div></div>
   {:else if paper}
-    <div class="reader-pane-tabs" aria-label="읽기 화면 전환">
-      <button class:active={mobilePane === 'pdf'} onclick={() => (mobilePane = 'pdf')}><Icon name="file" size={17} /> 원문</button>
-      <button class:active={mobilePane === 'note'} onclick={() => (mobilePane = 'note')}><Icon name="note" size={17} /> 노트</button>
-    </div>
-
     <div
       class="split-view"
       class:note-collapsed={noteCollapsed}
       class:resizing
-      data-mobile-pane={mobilePane}
+      class:mobile={isMobile}
       bind:this={splitViewEl}
       style:--split-note-width={`${noteWidth}px`}
     >
@@ -109,17 +119,32 @@
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
       />
 
-      {#if !noteCollapsed}
-        <div
-          class="split-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="원문/노트 패널 크기 조절"
-          onpointerdown={startResize}
-        ></div>
-      {/if}
+      {#if !isMobile}
+        {#if !noteCollapsed}
+          <div
+            class="split-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="원문/노트 패널 크기 조절"
+            onpointerdown={startResize}
+          ></div>
+        {/if}
 
-      <aside class="split-note-pane" aria-label="이 논문의 노트">
+        <aside class="split-note-pane" aria-label="이 논문의 노트">
+          {#key itemKey}
+            <MarkdownNote
+              initialMarkdown={paper.memo?.markdown ?? ''}
+              onSave={saveMemo}
+              draftKey={itemKey}
+              paperTitle={paper.title}
+            />
+          {/key}
+        </aside>
+      {/if}
+    </div>
+
+    {#if isMobile}
+      <NoteBottomSheet>
         {#key itemKey}
           <MarkdownNote
             initialMarkdown={paper.memo?.markdown ?? ''}
@@ -128,7 +153,7 @@
             paperTitle={paper.title}
           />
         {/key}
-      </aside>
-    </div>
+      </NoteBottomSheet>
+    {/if}
   {/if}
 </div>

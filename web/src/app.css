@@ -1410,10 +1410,6 @@ a.reader-title svg {
   padding: 4rem 2rem;
 }
 
-.reader-pane-tabs {
-  display: none;
-}
-
 .split-view {
   display: grid;
   width: 100%;
@@ -1683,13 +1679,19 @@ a.reader-title svg {
   background: var(--surface);
 }
 
-/* 원문/노트 탭 전환(모바일 레이아웃)을 쓰는 조건:
+/* 모바일 레이아웃(폰 + 세로모드 태블릿)을 쓰는 조건:
    (1) 폭 900px 이하 — 폰, 좁은 창.
    (2) 세로모드이면서 폭 1024px 이하 — 아이패드 세로(768/810/834/1024).
        아이패드 Pro 12.9" 세로는 폭이 1024px라 900px 기준만으로는 분할뷰로
-       빠지지만, 세로에서는 두 패널을 나란히 두기엔 좁으므로 탭 전환을 쓴다.
+       빠지지만, 세로에서는 두 패널을 나란히 두기엔 좁으므로 모바일 레이아웃을
+       쓴다.
    그 외(가로모드 + 폭 넓음, 즉 아이패드 가로 1024px 이상·데스크톱)는
-   기본 분할뷰(.split-view)를 그대로 유지한다. */
+   기본 분할뷰(.split-view)를 그대로 유지한다.
+
+   이 조건에서는 원문(PDF/HTML)을 화면 전체에 항상 띄우고, 노트는
+   PaperDetailSplit이 마운트하는 NoteBottomSheet(자기 마크업/스타일 소유)로
+   하단에서 끌어올린다 — 탭 전환/분할 노트 패널은 여기서 렌더하지 않는다.
+   조건 자체는 PaperDetailSplit의 matchMedia와 동일하게 맞춘다. */
 @media (max-width: 900px), (orientation: portrait) and (max-width: 1024px) {
   .reader-topbar {
     height: 56px;
@@ -1712,48 +1714,14 @@ a.reader-title svg {
     white-space: nowrap;
   }
 
-  .reader-pane-tabs {
-    display: grid;
-    height: 50px;
-    padding: 0.35rem 0.75rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    grid-template-columns: 1fr 1fr;
-    gap: 0.35rem;
-  }
-
-  .reader-pane-tabs button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    border-radius: 9px;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 0.72rem;
-    font-weight: 650;
-  }
-
-  .reader-pane-tabs button.active {
-    background: var(--accent-pale);
-    color: var(--accent);
-  }
-
-  .split-view {
-    height: calc(100dvh - 106px);
+  /* 모바일에서는 노트 패널/리사이저를 렌더하지 않으므로(바텀시트가 대체)
+     원문 패널이 화면(상단바 56px 제외)을 세로로 꽉 채운다. */
+  .split-view.mobile {
+    height: calc(100dvh - 56px);
     grid-template-columns: 1fr;
   }
 
-  .split-resizer {
-    display: none;
-  }
-
   .note-collapse-toggle {
-    display: none;
-  }
-
-  .split-view[data-mobile-pane='pdf'] .split-note-pane,
-  .split-view[data-mobile-pane='note'] .split-pdf-pane {
     display: none;
   }
 
