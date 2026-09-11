@@ -540,11 +540,17 @@
 
   // 팝업은 position: fixed라 화면 좌표를 그대로 쓴다. 위쪽 공간이 모자라면
   // 선택 영역 아래로 내려서 띄운다.
+  // 터치(굵은 포인터) 환경에선 손가락이 선택 영역 근처를 가리므로 팝업을 조금
+  // 더 띄워 손가락에 덜 가리게 한다. 마우스면 기존 8px 그대로.
+  const coarsePointer =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+
   function popupAnchor(rect) {
+    const gap = coarsePointer ? 14 : 8;
     const above = rect.top > 96;
     return {
       x: Math.min(window.innerWidth - 100, Math.max(100, rect.left + rect.width / 2)),
-      y: above ? rect.top - 8 : rect.bottom + 8,
+      y: above ? rect.top - gap : rect.bottom + gap,
       above,
     };
   }
@@ -1354,6 +1360,41 @@
   .highlight-delete:active {
     background: color-mix(in srgb, var(--danger) 22%, transparent);
     transform: scale(0.98);
+  }
+
+  /* 터치(굵은 포인터) 환경에서만 인터랙션 요소를 손가락 기준(iOS 44pt / Android
+     48dp 권장)으로 키운다. hover:none 대신 pointer:coarse로 판정해, 터치스크린이면서
+     마우스 커서도 쓰는 하이브리드 기기에서도 실제 입력 수단이 손가락일 때만 적용되게
+     한다. 데스크톱(마우스) 크기는 그대로 둔다. */
+  @media (pointer: coarse) {
+    .popup-card {
+      gap: 0.4rem;
+      padding: 0.4rem;
+    }
+
+    .popup-swatches {
+      gap: 0.55rem;
+    }
+
+    /* 25px → 44px: iOS 최소 권장(44pt) 충족. 간격도 4.5px → 8.8px로 벌려
+       옆 스와치 오터치를 줄인다. */
+    .highlight-swatch {
+      width: 44px;
+      height: 44px;
+    }
+
+    /* 삭제 버튼도 히트 영역 높이를 최소 44px로 맞추고 아이콘/글자를 키운다. */
+    .highlight-delete {
+      min-height: 44px;
+      padding: 0.5rem 0.85rem 0.5rem 0.7rem;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+    }
+
+    .highlight-delete-icon {
+      width: 18px;
+      height: 18px;
+    }
   }
 
   @media (prefers-color-scheme: dark) {
