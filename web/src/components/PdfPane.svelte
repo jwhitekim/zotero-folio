@@ -4,6 +4,7 @@
   import PdfViewer from './PdfViewer.svelte';
   import HtmlViewer from './HtmlViewer.svelte';
   import Icon from './Icon.svelte';
+  import { createTouchGestures } from '../utils/touch-gestures.js';
 
   // attachmentType: 'pdf' | 'html' | null. PDF면 pdf.js 엔진(PdfViewer)으로
   // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 HtmlViewer가
@@ -27,8 +28,14 @@
   // 스크롤을 매번 그 자리에서 즉시 보정한다. CSS 확대 미리보기(transform:
   // scale)와 스크롤 보정이 같은 틱에서 함께 적용되므로 서로 어긋나거나
   // 애니메이션끼리 경쟁할 여지가 없다 — origin은 절대 움직이지 않는다.
+  // 배율은 0.1%(0.001) 단위까지만 스냅한다 — 이전엔 1%(0.01)였는데, 휠은
+  // 한 틱이 이미 4% 이상이라 1% 스냅이 안 보였지만, 핀치는 손가락이 연속으로
+  // 움직이는 제스처라 1% 스냅이 "멈췄다가 1%씩 뚝뚝 뛰는" 계단식 확대로
+  // 보였다(한 스텝이 큰 페이지에선 수 px씩 튀고, 그 프레임에 scrollTop 보정도
+  // 한꺼번에 실린다). 더 잘게 스냅해 연속 제스처가 연속적으로 반영되게 한다.
+  // %는 표시할 때만 Math.round(pdfZoom * 100)로 정수로 보이므로 그대로 깔끔하다.
   function zoomTo(nextZoom, clientY) {
-    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(nextZoom * 100) / 100));
+    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(nextZoom * 1000) / 1000));
     if (clamped === pdfZoom || !pdfScrollEl) {
       pdfZoom = clamped;
       return;
@@ -71,6 +78,20 @@
     const step = zoomStep(e.deltaY);
     zoomTo(pdfZoom + (e.deltaY < 0 ? step : -step), e.clientY);
   }
+
+  // 태블릿 터치 제스처(한 손가락 팬 + 두 손가락 핀치)를 전부 직접 처리한다.
+  // .viewer-scroll에는 touch-action: none(app.css)을 걸어 네이티브 팬/핀치를
+  // 모두 끄고, 여기서 팬은 scrollTop 직접 갱신으로, 핀치는 기존 zoomTo로
+  // 처리한다 — 네이티브와 JS가 스크롤 위치를 두고 경합하던 문제(방향 뒤집힘/
+  // 튐)를 없앤다(docs/pdf-touch-pinch-zoom.md). 데스크탑 Ctrl/Cmd+휠 확대는
+  // 마우스 입력이라 무관하게 그대로 동작한다. PDF는 이 스크롤 요소 안에서
+  // 바로 렌더되므로 여기 부모에 붙이면 된다(HTML 스냅샷은 iframe 안이라
+  // HtmlViewer가 같은 헬퍼를 자기 iframe/스크롤 박스에 따로 단다).
+  const touch = createTouchGestures({
+    getZoom: () => pdfZoom,
+    zoomTo,
+    getScrollEl: () => pdfScrollEl,
+  });
 </script>
 
 <section class="split-pdf-pane" aria-label="원문">
@@ -100,7 +121,16 @@
   </div>
   {#if attachmentType === 'pdf'}
     <div class="viewer-scroll-wrap">
-      <div class="viewer-scroll" bind:this={pdfScrollEl} onwheel={onPdfWheel}>
+      <!-- svelte-ignore a11y_no_static_element_interactions -- 스크롤/핀치 확대를 받는 스크롤 컨테이너지 상호작용 위젯이 아니다 -->
+      <div
+        class="viewer-scroll"
+        bind:this={pdfScrollEl}
+        onwheel={onPdfWheel}
+        onpointerdown={touch.down}
+        onpointermove={touch.move}
+        onpointerup={touch.up}
+        onpointercancel={touch.cancel}
+      >
         <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} />
       </div>
     </div>

@@ -1620,6 +1620,12 @@ a.reader-title svg {
      브라우저 뒤로/앞으로가기 제스처로 새서 페이지가 넘어가버린다.
      contain으로 스크롤을 이 요소 안에 가둬 그 누출을 막는다. */
   overscroll-behavior-x: contain;
+  /* 태블릿 터치는 팬·핀치 모두 JS(createTouchGestures)로 직접 처리하므로
+     네이티브 터치 동작을 전부 끈다. pan-x pan-y로 팬만 네이티브에 맡기면
+     두 손가락 핀치 중 브라우저가 그 움직임을 팬으로도 해석해 우리 zoomTo의
+     scrollTop 보정과 경합한다(확대 방향 뒤집힘/튐) — docs/pdf-touch-pinch-zoom.md.
+     마우스/트랙패드 입력엔 영향 없어 데스크탑 Ctrl+휠 확대는 그대로다. */
+  touch-action: none;
   /* Windows는 세로 스크롤바가 레이아웃 폭을 15~17px 차지하는 클래식
      스크롤바라서, 확대로 페이지가 뷰포트보다 길어져 스크롤바가 막 나타나는
      순간 clientWidth가 갑자기 줄어든다 — 그 직후 렌더는 좁아진 폭 기준으로

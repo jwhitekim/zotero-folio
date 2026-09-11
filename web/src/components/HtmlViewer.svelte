@@ -18,6 +18,8 @@
   // "고정 크기로 그린 뒤 CSS로 배율만 곱하기" 방식이어야 세로 스크롤/줌인아웃이
   // PDF 쪽과 똑같이 동작한다 — fitWidthScale은 줌 도중엔 상수라서, 부모
   // PdfPane의 zoomTo() 스크롤 보정(비율 계산)이 그대로 맞아떨어진다.
+  import { createTouchGestures } from '../utils/touch-gestures.js';
+
   let { src, zoom, zoomStep, onZoomTo, scrollEl = $bindable() } = $props();
 
   let iframeEl = $state();
@@ -42,7 +44,10 @@
   // .html-viewer-scroll 스크롤바와 동시에 뜨는 이중 스크롤 원인이 됐다.
   function unblockOverflow(doc) {
     const style = doc.createElement('style');
-    style.textContent = 'html, body { overflow-x: auto !important; overflow-y: hidden !important; }';
+    // touch-action: none — iframe 안 문서의 네이티브 팬/핀치를 전부 끈다.
+    // 팬·핀치는 iframeTouch가 바깥 scrollEl 기준으로 직접 처리한다.
+    style.textContent =
+      'html, body { overflow-x: auto !important; overflow-y: hidden !important; touch-action: none !important; }';
     doc.head?.appendChild(style);
   }
 
@@ -67,10 +72,43 @@
     return availableWidth / contentWidth;
   }
 
+  // 바깥 스크롤 박스(iframe 밖 패딩 영역) 위에서의 터치 제스처. 팬은 이
+  // 스크롤 박스를 직접 스크롤하고, clientY가 이미 바깥 문서 기준이라 보정이
+  // 필요 없다.
+  const outerTouch = createTouchGestures({
+    getZoom: () => zoom,
+    zoomTo: onZoomTo,
+    getScrollEl: () => scrollEl,
+  });
+
+  // iframe 안(콘텐츠 위)에서의 터치 제스처. iframe은 별도 문서/윈도우라
+  // 포인터 이벤트가 바깥 스크롤 박스까지 올라오지 않으므로(onIframeWheel과
+  // 같은 이유) 그 안쪽 window에 직접 단다. 팬은 바깥 스크롤 박스(scrollEl)를
+  // 스크롤하고(iframe 자체는 콘텐츠 높이만큼 커져서 내부 스크롤이 없음),
+  // 핀치 중심 Y는 iframe 기준이라 iframe의 화면상 top을 더해 보정한다.
+  // 텍스트 선택 판정은 iframe 문서의 선택을 봐야 하므로 그 window의
+  // getSelection을 넘긴다.
+  const iframeTouch = createTouchGestures({
+    getZoom: () => zoom,
+    zoomTo: onZoomTo,
+    getScrollEl: () => scrollEl,
+    getSelection: () => iframeEl?.contentWindow?.getSelection() ?? null,
+    clientYOffset: () => iframeEl?.getBoundingClientRect().top ?? 0,
+  });
+
   function attachIframeZoom() {
     const doc = iframeEl?.contentDocument;
     if (doc) unblockOverflow(doc);
     iframeEl?.contentWindow?.addEventListener('wheel', onIframeWheel, { passive: false });
+    const win = iframeEl?.contentWindow;
+    if (win) {
+      // pointermove는 팬/핀치 중 preventDefault로 네이티브 동작을 막아야 하므로
+      // passive: false로 단다.
+      win.addEventListener('pointerdown', iframeTouch.down);
+      win.addEventListener('pointermove', iframeTouch.move, { passive: false });
+      win.addEventListener('pointerup', iframeTouch.up);
+      win.addEventListener('pointercancel', iframeTouch.cancel);
+    }
     // 폭 맞춤 계산은 아래 $effect가 담당한다 — loaded를 여기서 true로만
     // 바꾼다. iframe onload 시점에 scrollEl(자기 자신의 스크롤 박스)이
     // 아직 bind:this로 안 잡혀 있을 수 있어서, 여기서 바로 재는 대신
@@ -142,7 +180,16 @@
   });
 </script>
 
-<div class="html-viewer-scroll" bind:this={scrollEl} onwheel={onWheel}>
+<!-- svelte-ignore a11y_no_static_element_interactions -- 스크롤/핀치 확대를 받는 스크롤 컨테이너지 상호작용 위젯이 아니다 -->
+<div
+  class="html-viewer-scroll"
+  bind:this={scrollEl}
+  onwheel={onWheel}
+  onpointerdown={outerTouch.down}
+  onpointermove={outerTouch.move}
+  onpointerup={outerTouch.up}
+  onpointercancel={outerTouch.cancel}
+>
   <div
     class="html-scale-sizer"
     style:width={`${contentWidth * fitWidthScale * zoom}px`}
@@ -178,6 +225,10 @@
        브라우저 뒤로/앞으로가기 제스처로 새어버린다 — PDF 쪽(.viewer-scroll,
        app.css) contain으로 스크롤을 이 요소 안에 가둔다. */
     overscroll-behavior-x: contain;
+    /* PDF 쪽(.viewer-scroll)과 같은 이유 — 팬·핀치를 모두 JS로 직접
+       처리하므로 네이티브 터치 동작을 전부 끈다(pan-x pan-y로 팬만 네이티브에
+       맡기면 핀치 중 스크롤 경합이 생긴다, docs/pdf-touch-pinch-zoom.md). */
+    touch-action: none;
     scrollbar-gutter: stable;
     scrollbar-color: var(--border-strong) transparent;
     scrollbar-width: thin;
@@ -216,5 +267,7 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     background: #fff;
+    /* iframe 자체에서도 네이티브 팬/핀치를 전부 끈다(iframeTouch가 처리). */
+    touch-action: none;
   }
 </style>
