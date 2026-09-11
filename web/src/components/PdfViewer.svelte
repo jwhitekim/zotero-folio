@@ -257,6 +257,55 @@
   function closePopups() {
     colorPopup = null;
     deletePopup = null;
+    copied = false;
+    clearTimeout(copyTimer);
+  }
+
+  // 색상 팔레트 팝업의 복사 버튼 상태 — 복사 성공 직후 잠깐 체크마크로 바꿔
+  // 시각 피드백을 준다.
+  let copied = $state(false);
+  let copyTimer;
+
+  function flashCopied() {
+    copied = true;
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (copied = false), 1500);
+  }
+
+  // 비보안 컨텍스트/구형 사파리 등 navigator.clipboard가 없거나 막힌 경우의 폴백.
+  function copyWithExecCommand(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (!ok) throw new Error('execCommand 복사 거부됨');
+  }
+
+  // 팝업을 띄울 때 확정해둔 선택 텍스트를 클립보드에 복사한다. 이 시점엔 이미
+  // 네이티브 선택을 지웠으므로(콜아웃 제거) 저장해둔 colorPopup.text를 쓴다.
+  async function copySelection() {
+    const text = colorPopup?.text ?? '';
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        copyWithExecCommand(text);
+      }
+      flashCopied();
+    } catch (err) {
+      // clipboard API가 권한/컨텍스트 문제로 거부되면 execCommand로 한 번 더 시도.
+      try {
+        copyWithExecCommand(text);
+        flashCopied();
+      } catch (fallbackErr) {
+        showHighlightError(`복사하지 못했어요: ${fallbackErr.message}`);
+      }
+    }
   }
 
   // 색상 팔레트와 삭제 확인 팝업은 동시에 뜨지 않는다 — 어느 쪽을 띄우든
@@ -281,9 +330,9 @@
   // 즉시 닫혀서 "드래그해도 팝업이 안 뜨는" 것처럼 보였다.
   let popupScrollTop = 0;
 
-  function openColorPopup(items, anchor) {
+  function openColorPopup(items, anchor, text = '') {
     popupScrollTop = scrollContainer?.scrollTop ?? 0;
-    colorPopup = { items, ...anchor };
+    colorPopup = { items, text, ...anchor };
     popupView = { kind: 'color', ...anchor };
   }
 
@@ -666,16 +715,25 @@
       if (items.length) {
         const reselected = findReselectedHighlights(items);
         const anchor = popupAnchor(range.getBoundingClientRect());
+        // 복사 버튼용 원문 텍스트를 선택이 아직 살아 있는 지금 확정해둔다.
+        const selectedText = selection.toString();
+        // 팝업에 필요한 정보(rect/텍스트)를 다 읽었으니 네이티브 선택을 지운다.
+        // 이 시점은 pointerup 이후라 드래그가 완전히 끝난 뒤다 —
+        // touch-gestures.js의 팬-vs-선택 판정은 pointermove에서 window.getSelection을
+        // 읽어 이미 'select' 모드로 확정된 상태이고, up()에서 mode가 정리되므로
+        // 여기서 선택을 지워도 그 판정을 깨지 않는다(드래그 도중엔 절대 안 지움).
+        // 이로써 태블릿 사파리의 텍스트 선택 콜아웃(Copy/Look Up 등)이 사라진다 —
+        // 복사 기능은 아래 팝업의 복사 버튼으로 대체한다.
+        window.getSelection()?.removeAllRanges();
         if (reselected.length) {
           openDeletePopup(reselected, anchor);
         } else if (e.altKey && lastColor) {
           // 빠르게 칠하기 — Alt(맥은 Option)를 누른 채 드래그를 끝내면 팔레트를
           // 거치지 않고 마지막에 쓴 색으로 바로 칠한다. 그냥 드래그하는 건 복사
           // 같은 다른 목적일 수 있으므로 기본값은 팔레트를 띄우는 쪽이다.
-          window.getSelection()?.removeAllRanges();
           paintHighlights(items, lastColor);
         } else {
-          openColorPopup(items, anchor);
+          openColorPopup(items, anchor, selectedText);
         }
         return;
       }
@@ -1018,6 +1076,7 @@
       clearTimeout(resizeTimer);
       clearTimeout(zoomTimer);
       clearTimeout(errorTimer);
+      clearTimeout(copyTimer);
       resizeObserver.disconnect();
       eventAbort.abort();
     };
@@ -1156,6 +1215,45 @@
               onclick={() => createHighlight(color.value)}
             ></button>
           {/each}
+          <span class="popup-divider" aria-hidden="true"></span>
+          <!-- 태블릿 사파리 콜아웃을 지우면서 복사 수단이 사라지므로, 팔레트에
+               복사 버튼을 둔다. 팝업을 띄울 때 확정해둔 선택 텍스트를 복사한다. -->
+          <button
+            class="popup-copy"
+            class:is-copied={copied}
+            title="선택한 텍스트 복사"
+            aria-label="선택한 텍스트 복사"
+            onclick={copySelection}
+          >
+            {#if copied}
+              <svg
+                class="popup-copy-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.1"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            {:else}
+              <svg
+                class="popup-copy-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="9" y="9" width="11" height="11" rx="2" />
+                <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+              </svg>
+            {/if}
+          </button>
         </div>
         <!-- 마지막 색을 아직 모르는 첫 사용 때는 안내해도 쓸 수 없으므로 감춘다. -->
         {#if lastColor}
@@ -1340,6 +1438,54 @@
     transform: translateY(0) scale(1.02);
   }
 
+  /* 스와치와 복사 버튼을 가르는 얇은 세로 구분선. */
+  .popup-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 0.12rem 0.02rem;
+    background: var(--popup-border);
+  }
+
+  /* 복사 버튼 — 스와치와 같은 원형 톤을 유지하되 색 대신 아이콘으로 구분한다. */
+  .popup-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-soft);
+    box-shadow: inset 0 0 0 1px var(--swatch-ring);
+    transition:
+      transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1),
+      box-shadow 160ms ease,
+      color 140ms ease;
+  }
+
+  .popup-copy:hover,
+  .popup-copy:focus-visible {
+    transform: translateY(-1px) scale(1.12);
+    color: var(--text);
+  }
+
+  .popup-copy:active {
+    transform: translateY(0) scale(1.02);
+  }
+
+  /* 복사 성공 피드백 — 잠깐 체크마크로 바뀌며 성공 색을 띤다. */
+  .popup-copy.is-copied {
+    color: var(--success, #2f8f5b);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success, #2f8f5b) 45%, transparent);
+  }
+
+  .popup-copy-icon {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+  }
+
   .highlight-delete {
     display: inline-flex;
     align-items: center;
@@ -1391,6 +1537,16 @@
       height: 44px;
     }
 
+    .popup-copy {
+      width: 44px;
+      height: 44px;
+    }
+
+    .popup-copy-icon {
+      width: 18px;
+      height: 18px;
+    }
+
     /* 삭제 버튼도 히트 영역 높이를 최소 44px로 맞추고 아이콘/글자를 키운다. */
     .highlight-delete {
       min-height: 44px;
@@ -1430,14 +1586,18 @@
      (등장/퇴장 트랜지션은 popupMotion()이 duration 0으로 처리한다). */
   @media (prefers-reduced-motion: reduce) {
     .highlight-swatch,
-    .highlight-delete {
+    .highlight-delete,
+    .popup-copy {
       transition: none;
     }
 
     .highlight-swatch:hover,
     .highlight-swatch:focus-visible,
     .highlight-swatch:active,
-    .highlight-delete:active {
+    .highlight-delete:active,
+    .popup-copy:hover,
+    .popup-copy:focus-visible,
+    .popup-copy:active {
       transform: none;
     }
   }
