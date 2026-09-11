@@ -545,9 +545,17 @@
   const coarsePointer =
     typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 
+  // 태블릿 사파리는 텍스트를 선택하면 그 위에 자체 Copy/Look Up 팝업을
+  // 띄운다(CSS로 못 끄는 네이티브 UI — -webkit-touch-callout은 링크
+  // 롱프레스에만 먹고 텍스트 선택 콜아웃은 안 먹음, 복사 기능을 없애면서까지
+  // 지울 수도 없음). 그 사파리 팝업이 보통 선택 영역 "위" 공간이 있으면
+  // 위에 뜨는데, 우리 팝업도 기본이 "위"라 둘이 겹쳤다. 그래서 기본
+  // 방향을 아래로 뒤집는다 — 아래쪽에 공간이 부족할 때(화면 하단에 붙어
+  // 있을 때)만 위로 띄운다. 사파리 팝업은 그대로 둬서 복사 기능은 유지.
   function popupAnchor(rect) {
     const gap = coarsePointer ? 14 : 8;
-    const above = rect.top > 96;
+    const popupHeight = coarsePointer ? 160 : 120;
+    const above = window.innerHeight - rect.bottom < popupHeight;
     return {
       x: Math.min(window.innerWidth - 100, Math.max(100, rect.left + rect.width / 2)),
       y: above ? rect.top - gap : rect.bottom + gap,
