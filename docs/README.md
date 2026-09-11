@@ -16,6 +16,7 @@ CLAUDE.md에 다 담기엔 긴 내용을 옮겨둔 곳입니다.
 | [changelog.md](changelog.md) | git 로그를 주제별로 재구성한 전체 개발 기록 |
 | [tablet-touch-ux-ideas.md](tablet-touch-ux-ideas.md) | 태블릿/모바일 터치 UX 논의(핀치 확대, 필기, 그 밖 디자인 방향) |
 | [pdf-ink-annotation-research.md](pdf-ink-annotation-research.md) | Zotero ink(필기) annotation 데이터 형식 조사 |
+| [pdf-touch-pinch-zoom.md](pdf-touch-pinch-zoom.md) | PDF 터치 핀치 확대/축소의 `touch-action` 충돌 원인 조사 |
 
 ## 새 문서를 추가할 때
 
