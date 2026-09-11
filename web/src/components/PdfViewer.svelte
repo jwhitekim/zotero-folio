@@ -717,20 +717,13 @@
         const anchor = popupAnchor(range.getBoundingClientRect());
         // 복사 버튼용 원문 텍스트를 선택이 아직 살아 있는 지금 확정해둔다.
         const selectedText = selection.toString();
-        // 팝업에 필요한 정보(rect/텍스트)를 다 읽었으니 네이티브 선택을 지운다.
-        // 이 시점은 pointerup 이후라 드래그가 완전히 끝난 뒤다 —
-        // touch-gestures.js의 팬-vs-선택 판정은 pointermove에서 window.getSelection을
-        // 읽어 이미 'select' 모드로 확정된 상태이고, up()에서 mode가 정리되므로
-        // 여기서 선택을 지워도 그 판정을 깨지 않는다(드래그 도중엔 절대 안 지움).
-        // 이로써 태블릿 사파리의 텍스트 선택 콜아웃(Copy/Look Up 등)이 사라진다 —
-        // 복사 기능은 아래 팝업의 복사 버튼으로 대체한다.
-        window.getSelection()?.removeAllRanges();
         if (reselected.length) {
           openDeletePopup(reselected, anchor);
         } else if (e.altKey && lastColor) {
           // 빠르게 칠하기 — Alt(맥은 Option)를 누른 채 드래그를 끝내면 팔레트를
           // 거치지 않고 마지막에 쓴 색으로 바로 칠한다. 그냥 드래그하는 건 복사
           // 같은 다른 목적일 수 있으므로 기본값은 팔레트를 띄우는 쪽이다.
+          window.getSelection()?.removeAllRanges();
           paintHighlights(items, lastColor);
         } else {
           openColorPopup(items, anchor, selectedText);
