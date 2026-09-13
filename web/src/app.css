@@ -1803,6 +1803,13 @@ a.reader-title svg {
   grid-template-columns: repeat(3, 1fr);
 }
 
+/* .tabbar/.search-fab 배경은 라이트/다크 테마와 무관하게 고정된 흰 유리
+   재질이라(위 주석 참고), 그 위에 얹는 아이콘/글자 색도 테마 변수(다크
+   모드에서 밝은 색으로 바뀌는 --text-muted/--accent)를 그대로 쓰면 안
+   된다 — 다크 모드에서 밝은 글자가 밝은 유리 배경과 겹쳐 거의 안 보이는
+   문제가 있었다(강조색 accent가 특히 심함: 다크 모드 --accent는 연한
+   하늘색이라 흰 배경 위에서 거의 안 보임). 그래서 이 캡슐 안에서만
+   라이트 모드 색상값을 고정으로 쓴다. */
 .search-fab {
   display: grid;
   flex: 0 0 auto;
@@ -1810,16 +1817,16 @@ a.reader-title svg {
   height: 68px;
   place-items: center;
   border-radius: 50%;
-  color: var(--text-muted);
+  color: #918a7e;
   transition: color 160ms ease, transform 160ms ease;
 }
 
 .search-fab:hover {
-  color: var(--text-soft);
+  color: #625d53;
 }
 
 .search-fab.active {
-  color: var(--accent);
+  color: #315a8a;
 }
 
 .search-fab:active {
@@ -1868,7 +1875,9 @@ a.reader-title svg {
   padding: 0.4rem;
   border-radius: 14px;
   background: transparent;
-  color: var(--text-muted);
+  /* 고정 흰 유리 캡슐 위 색상 — 위 .search-fab 주석 참고, 테마 변수 대신
+     라이트 모드 값을 고정으로 쓴다. */
+  color: #918a7e;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -1877,11 +1886,11 @@ a.reader-title svg {
 }
 
 .tab-btn:hover {
-  color: var(--text-soft);
+  color: #625d53;
 }
 
 .tab-btn.active {
-  color: var(--accent);
+  color: #315a8a;
 }
 
 .tab-btn .icon {
