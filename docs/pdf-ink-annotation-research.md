@@ -1,84 +1,68 @@
 # Zotero ink(필기) annotation 형식 조사
 
 태블릿 환경에서 펜으로 PDF에 직접 필기하는 기능을 검토하며 조사한
-Zotero ink annotation 데이터 형식 기록.
+Zotero ink annotation 데이터 형식 기록. 실측으로 확정 완료.
 
 ## 배경
 
 태블릿 UX 개선 논의 중 "펜으로 글을 쓰거나 형광펜을 칠할 수 있는 UX"
 필요성이 제기됨. 형광펜(하이라이트)은 이미 구현 완료(`annotationType:
 'highlight'`, `docs/pdf-highlight-popup.md` 참고). 자유 필기는 Zotero의
-별도 annotation 타입인 ink를 활용하는 방향이 유력.
+별도 annotation 타입인 ink를 활용하는 방향.
 
 ## 확인 방법
 
-Zotero 공식 API 문서에는 ink annotation의 정확한 데이터 구조가
-공개돼 있지 않음. 대신 Zotero의 PDF 뷰어 엔진 소스코드 저장소
-([zotero/reader](https://github.com/zotero/reader), `src/common/types.ts`)를
-직접 확인.
+1차로 Zotero 공식 소스코드 저장소([zotero/reader](https://github.com/zotero/reader),
+`src/common/types.ts`)에서 타입 정의를 확인해 `paths` 필드 존재와
+`annotationType`에 `'ink'`가 포함됨을 확인. 다만 선 굵기 필드는 그
+타입 정의만으로는 확인 실패(`docs/pdf-highlight-popup-safari-callout.md`
+작성 시점 기준 미확인 상태로 남아 있었음).
 
-## 확인된 내용
+2차로 실측 확인: Zotero 데스크톱에서 실제 PDF에 ink 선 하나를 그은 뒤,
+Zotero Web API(`GET /users/<id>/items?itemType=annotation`)로 해당
+아이템의 원본 JSON을 직접 조회.
 
-```typescript
-type AnnotationType =
-  'highlight' | 'underline' | 'note' | 'image' | 'text' | 'ink' | 'eraser';
+## 확정된 데이터 구조 (실측)
 
-type PDFPosition = {
-  pageIndex: number;
-  rects?: number[][];        // 하이라이트가 사용
-  paths?: number[][];        // ink가 사용
-  nextPageRects?: number[][];
-};
-
-interface Annotation {
-  id: string;
-  type: AnnotationType;
-  color?: string;
-  sortIndex: string;
-  pageLabel?: string;
-  position: Position;        // PDF의 경우 PDFPosition
-  text?: string;
-  comment?: string;
-  tags: string[];
-  dateCreated: string;
-  dateModified: string;
-  readOnly?: boolean;
-  authorName: string;
-  isAuthorNameAuthoritative: boolean;
+```json
+{
+  "key": "DMFJNWQH",
+  "itemType": "annotation",
+  "annotationType": "ink",
+  "annotationComment": "",
+  "annotationColor": "#2ea8e5",
+  "annotationPageLabel": "1",
+  "annotationSortIndex": "00000|000000|00000",
+  "annotationPosition": "{\"pageIndex\":0,\"width\":2,\"paths\":[[251.813,733.35,253.127,733.669, ...]]}",
+  "tags": [],
+  "relations": {}
 }
 ```
 
-- `'ink'`가 `AnnotationType`에 공식으로 포함(지원 확인).
-- 선 좌표는 하이라이트의 `rects`와 같은 위치의 필드인
-  `paths: number[][]`에 저장 — 구조 대칭성 확인.
+`annotationPosition`(문자열로 이중 인코딩된 JSON) 내부 구조:
 
-## 미확인 사항 — 선 굵기(획 두께)
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `pageIndex` | number | 페이지 번호(0부터 시작) — 하이라이트와 동일 |
+| `width` | number | **선 굵기.** `paths`와 같은 레벨의 독립 필드(이전까지 미확인이던 값). 이 샘플에서 2 |
+| `paths` | number[][] | 선(스트로크) 목록. 안쪽 배열 하나가 스트로크 1개, `[x1, y1, x2, y2, x3, y3, ...]` 형태로 x/y 좌표가 번갈아 나열된 평탄화 배열 |
 
-`types.ts` 전체를 훑어도 `width`/`strokeWidth`류 필드를 찾지 못함.
-가능성 3가지:
-1. `paths`의 숫자 배열 안에 좌표와 함께 인코딩(예: [x, y, 압력] 반복).
-2. 다른 소스 파일(예: 렌더러 쪽 구현체)에 별도 필드로 존재.
-3. annotation 단위가 아니라 도구(ink 펜) 설정값이라 개별 annotation
-   데이터엔 아예 없을 가능성.
+`annotationColor`/`annotationComment`/`annotationPageLabel`/
+`annotationSortIndex`/`tags`/`relations` 등 나머지 최상위 필드는
+하이라이트 annotation과 완전히 동일한 구조 — Folio의 기존 하이라이트
+생성 코드(`server/zotero.js`, `web/src/utils/pdf-highlight.js`)를
+그대로 확장할 수 있음.
 
-## 다음 확인 단계
+## 구현 시 참고할 점
 
-1. Zotero 데스크톱 앱에서 실제 ink annotation 하나를 직접 그려서
-   생성.
-2. Zotero Web API(`GET /users/<id>/items/<key>`)로 생성된 해당
-   아이템의 원본 JSON을 조회해 `data.annotationPosition` 실측값 확인
-   — `paths` 배열의 실제 숫자 개수/순서, 굵기 관련 필드 유무를 직접
-   대조.
-3. 여러 굵기로 그은 샘플을 비교해 굵기 인코딩 위치 특정.
-
-## 리스크 요약
-
-- 공식 문서가 없어 소스코드 기반 역추적에 의존 — 관찰 범위 밖의
-  예외 케이스(회전 페이지, 압력 감지 펜 등)를 놓칠 가능성 존재.
-- Folio에서 생성한 ink annotation이 Zotero 데스크톱/모바일 앱에서
-  정상 렌더링되는지는 브라우저 테스트로 확인 불가 — 매번 실제 Zotero
-  앱으로 대조 필요, 검증 주기가 하이라이트 기능보다 느림.
-- Zotero가 내부 형식을 문서화 없이 바꾸면 조용히 깨질 가능성 존재.
+- 좌표 단위는 하이라이트의 `rects`와 같은 PDF 좌표계(포인트, 페이지
+  왼쪽 아래가 원점)로 추정 — 하이라이트 좌표 변환 로직을 그대로
+  재사용 가능.
+- `width`는 스트로크마다가 아니라 annotation 하나당 값 하나 — 굵기를
+  바꾸려면 새 annotation(새 스트로크 그룹)을 만들어야 함.
+- 실측 샘플은 스트로크 1개(`paths` 배열 길이 1) 확인 — 펜을 여러 번
+  떼었다 붙였다 하며 그린 필기가 스트로크 여러 개로 나뉘어 `paths`
+  배열에 누적되는지는 추가 샘플로 확인 필요.
 
 ## 관련 문서
 
