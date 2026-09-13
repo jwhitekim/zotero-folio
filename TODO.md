@@ -3,6 +3,7 @@
 ## 진행 중
 
 ## 완료
+- [x] 필기 지우개 모드 구현 — 펜과 상호 배타인 별도 토글 버튼, 드래그 경로에 닿는 스트로크를 확인 팝업 없이 즉시 삭제(한글 100자 기준 스트로크 300개+ 대비, 확인창 없는 이유). `findInkKeysAt`로 다중 스트로크 히트테스트, 삭제는 펜의 탭 삭제와 같은 `deleteInkWhenSaved` 경로 재사용, `erasedInDrag`로 같은 드래그 내 중복 삭제 방지. `touch-gestures.js`의 `isPenMode`를 `penMode || eraserMode`로 일반화. 빌드 통과, `f5c3ca3` 푸시 완료. 실기기(터치/스타일러스 드래그 지우기) 확인 필요
 - [x] PDF 필기(ink) 기능 1차 구현 — 원문 툴바에 펜 토글 + 굵기 선택(얇음/보통/굵음), 색은 고정(`#1a1a1a`). 하이라이트와 같은 Zotero annotation 동기화 패턴(낙관적 쓰기, pending key, 공용 삭제 확인 팝업) 재사용. `/api/papers/:key/ink` 라우트 병렬 추가, `touch-gestures.js`에 펜 모드 시 한 손가락 팬 대신 그리기로 넘기는 분기 추가. 빌드 통과, `3a67880` 푸시 완료. 실기기(터치/스타일러스) 확인 필요
 - [x] Zotero ink annotation 실제 데이터 형식 확인 — 사용자가 만든 샘플을 API로 조회해 확정. `annotationPosition = {pageIndex, width, paths}`, `width`는 굵기(스트로크 공통 1개), `paths`는 `number[][]`(스트로크별 평탄화 좌표). `docs/pdf-ink-annotation-research.md`에 기록, `d04b693` 푸시 완료
 - [x] 작업 디렉터리를 프로젝트 루트로 고정하는 규칙 + 루트 빌드 스크립트 추가 — Stop 훅이 `cd web` 이후 작업 디렉터리 복귀 누락으로 상대경로를 못 찾아 실패한 사고 재발 방지. `.claude/CLAUDE.md`에 규칙 기록, 루트 `package.json`에 `npm run build`(재빌드용, 빠름) 추가
