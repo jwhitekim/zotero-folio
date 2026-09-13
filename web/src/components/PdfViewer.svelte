@@ -21,6 +21,14 @@
     toPageBox,
     coveredWidthRatio,
   } from '../utils/pdf-highlight.js';
+  import {
+    INK_COLOR,
+    toPdfPoint,
+    strokeToPagePath,
+    strokeToClientPoints,
+    isPointNearStroke,
+    strokeMaxY,
+  } from '../utils/pdf-ink.js';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -29,7 +37,9 @@
   // 같은 요소를 넘겨줘야 확대 시 커서 고정 스크롤 보정(PdfPane.svelte의
   // zoomTo)이 계속 같은 스크롤 위치 기준으로 동작한다.
   // itemKey: 하이라이트를 읽고 쓸 논문 키. 없으면 형광펜 기능만 조용히 꺼진다.
-  let { src, zoom = 1, scrollContainer, itemKey = null } = $props();
+  // penMode: 부모(PdfPane)가 단일 소스로 갖는 펜(필기) 모드. 켜지면 드래그가
+  // 텍스트 선택이 아니라 자유 드로잉이 된다. penWidth: 선 굵기(PDF pt).
+  let { src, zoom = 1, scrollContainer, itemKey = null, penMode = false, penWidth = 2 } = $props();
 
   let viewerEl = $state();
   let loading = $state(true);
@@ -336,10 +346,18 @@
     popupView = { kind: 'color', ...anchor };
   }
 
-  function openDeletePopup(keys, anchor) {
+  // target: 'highlight'(기본) | 'ink' — 같은 삭제 확인 팝업을 형광펜/필기가 함께
+  // 쓰고, 버튼 문구와 실제 삭제 함수만 이 값으로 가른다.
+  function openDeletePopup(keys, anchor, target = 'highlight') {
     popupScrollTop = scrollContainer?.scrollTop ?? 0;
-    deletePopup = { keys, ...anchor };
-    popupView = { kind: 'delete', ...anchor };
+    deletePopup = { keys, target, ...anchor };
+    popupView = { kind: 'delete', target, ...anchor };
+  }
+
+  // 삭제 확인 팝업의 버튼 — 대상에 따라 형광펜/필기 삭제로 분기한다.
+  function confirmDelete() {
+    if (deletePopup?.target === 'ink') removeInk();
+    else removeHighlight();
   }
 
   function onViewerScroll() {
@@ -514,6 +532,74 @@
     for (let i = 1; i <= pageViews().length; i += 1) safeRenderHighlightLayer(i);
   }
 
+  // --- 필기(ink) ---------------------------------------------------------
+  // 하이라이트와 같은 원칙: 저장소는 Zotero(annotationType: ink)이고 로컬 캐시는
+  // 없다. Zotero 데스크톱/모바일에서 그은 필기도 그대로 읽어와 그린다.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  let inks = $state([]);
+
+  function inkLayerOf(pageView) {
+    return pageView.div?.querySelector(':scope > .folio-ink-layer') ?? null;
+  }
+
+  // 한 페이지의 필기 스트로크를 SVG로 다시 그린다. 하이라이트 레이어와 같은
+  // 이유로 pagerendered/textlayerrendered마다 새로 붙인다.
+  function renderInkLayer(pageNumber) {
+    const pageView = pageViews()[pageNumber - 1];
+    if (!pageView?.div || !pageView.viewport) return;
+
+    const pageIndex = pageNumber - 1;
+    const items = inks.filter((k) => k.pageIndex === pageIndex && Array.isArray(k.paths) && k.paths.length);
+    let layer = inkLayerOf(pageView);
+
+    if (!items.length) {
+      layer?.remove();
+      return;
+    }
+
+    if (!layer) {
+      layer = document.createElementNS(SVG_NS, 'svg');
+      layer.setAttribute('class', 'folio-ink-layer');
+    }
+    // 하이라이트 레이어(글자 아래)와 달리 필기는 글자 위에 얹혀야 자연스럽다 —
+    // 텍스트 레이어 뒤(=위)에 붙인다.
+    pageView.div.appendChild(layer);
+
+    const scale = visualScale(pageView) / previewFactor();
+    layer.setAttribute('width', String(pageView.div.clientWidth || 0));
+    layer.setAttribute('height', String(pageView.div.clientHeight || 0));
+
+    const children = [];
+    for (const ink of items) {
+      for (const stroke of ink.paths) {
+        const d = strokeToPagePath(stroke, pageView.viewport, scale);
+        if (!d) continue;
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', ink.color);
+        path.setAttribute('stroke-width', String(ink.width * scale));
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.dataset.inkKey = ink.key;
+        children.push(path);
+      }
+    }
+    layer.replaceChildren(...children);
+  }
+
+  function safeRenderInkLayer(pageNumber) {
+    try {
+      renderInkLayer(pageNumber);
+    } catch (err) {
+      console.warn('[PdfViewer] 필기 레이어 렌더 실패', pageNumber, err);
+    }
+  }
+
+  function renderAllInkLayers() {
+    for (let i = 1; i <= pageViews().length; i += 1) safeRenderInkLayer(i);
+  }
+
   async function loadHighlights() {
     highlights = [];
     // 다른 논문으로 넘어가면 이전 문서의 임시 key 대응표는 쓸모가 없다.
@@ -525,6 +611,41 @@
       // 하이라이트를 못 읽어도 PDF 읽기 자체는 계속돼야 한다 — 로그만 남긴다.
       console.warn('[PdfViewer] 하이라이트 조회 실패', err);
     }
+  }
+
+  async function loadInk() {
+    inks = [];
+    resolvedInkKeys.clear();
+    if (!itemKey) return;
+    try {
+      inks = await api.listInk(itemKey);
+    } catch (err) {
+      console.warn('[PdfViewer] 필기 조회 실패', err);
+    }
+  }
+
+  // 화면 좌표에 닿는 필기 스트로크를 찾는다(탭해서 지우기용). 필기 레이어는
+  // pointer-events: none이라 클릭이 직접 닿지 않으므로 좌표로 직접 비교한다.
+  function findInkAt(clientX, clientY) {
+    for (const pageView of pageViews()) {
+      if (!pageView?.div || !pageView.viewport) continue;
+      const pageIndex = pageView.id - 1;
+      const items = inks.filter((k) => k.pageIndex === pageIndex && Array.isArray(k.paths) && k.paths.length);
+      if (!items.length) continue;
+      const pageRect = pageView.div.getBoundingClientRect();
+      const scale = visualScale(pageView);
+      for (const ink of items) {
+        // 손가락/펜 끝 오차를 감안해, 선 굵기 절반에 여유를 더한 값을 허용 거리로.
+        const tolerance = Math.max(10, (ink.width * scale) / 2 + 8);
+        for (const stroke of ink.paths) {
+          const pts = strokeToClientPoints(stroke, pageRect, pageView.viewport, scale);
+          if (pts.length && isPointNearStroke(clientX, clientY, pts, tolerance)) {
+            return { key: ink.key, clientX, clientY };
+          }
+        }
+      }
+    }
+    return null;
   }
 
   // 선택 영역을 "페이지별 하이라이트 1개"로 쪼갠다. 페이지를 걸쳐 드래그하면
@@ -644,6 +765,8 @@
     try {
       if (isInsidePopup(e)) return;
       closePopups();
+      // 펜 모드면 이 pointerdown부터 스트로크를 시작한다.
+      if (penMode) onDrawPointerDown(e);
     } catch (err) {
       console.warn('[PdfViewer] 팝업 닫기 실패', err);
       colorPopup = null;
@@ -707,6 +830,9 @@
 
   function handleViewerPointerUp(e) {
     if (!itemKey || isInsidePopup(e)) return;
+    // 펜 모드의 pointerup은 그리기 핸들러(onDrawPointerUp)가 전담한다 —
+    // 여기서 형광펜/선택 로직을 돌리지 않는다.
+    if (penMode) return;
 
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -733,7 +859,14 @@
     }
 
     const hit = findHighlightAt(e.clientX, e.clientY);
-    if (hit) openDeletePopup([hit.key], popupAnchor(hit.rect));
+    if (hit) {
+      openDeletePopup([hit.key], popupAnchor(hit.rect));
+      return;
+    }
+    // 형광펜이 없으면 그 자리의 필기 스트로크를 탭한 것인지 본다(펜 모드가
+    // 아니어도 그린 필기는 탭해서 지울 수 있다).
+    const inkHit = findInkAt(e.clientX, e.clientY);
+    if (inkHit) openDeletePopup([inkHit.key], popupAnchor(tapRect(e)), 'ink');
     else deletePopup = null;
   }
 
@@ -754,6 +887,13 @@
   // 끝난 뒤에 누르면 임시 key를 진짜 key로 못 바꿔 삭제가 조용히 누락됐다
   // (화면에서만 사라지고 Zotero에는 그대로 남음). 그 대응표는 따로 남긴다.
   const resolvedPendingKeys = new Map();
+
+  // 필기도 하이라이트와 같은 낙관적 저장 패턴을 쓴다 — 임시 key로 먼저 그리고
+  // Zotero 저장은 뒤에서. 아래 세 자료구조는 각각 pendingCreations/
+  // resolvedPendingKeys/pendingKeySeq의 필기용 짝이다.
+  const pendingInkCreations = new Map();
+  const resolvedInkKeys = new Map();
+  let pendingInkSeq = 0;
 
   // 색상이 정해지는 즉시 임시 하이라이트를 화면에 그리고, Zotero 저장은 뒤에서
   // 진행한다 — API 왕복을 기다리는 동안 아무 반응이 없는 것처럼 보이던 딜레이를
@@ -858,6 +998,192 @@
     renderAllHighlightLayers();
   });
 
+  // 필기 목록/배율이 바뀌면 필기 레이어도 다시 그린다.
+  $effect(() => {
+    inks;
+    zoom;
+    renderedZoom;
+    renderAllInkLayers();
+  });
+
+  // --- 필기 그리기 -------------------------------------------------------
+  // 펜 모드에서 포인터 드래그를 받아 스트로크를 그린다. 그리는 동안은 화면
+  // 좌표(client)로 미리보기 SVG를 그리고, pointerup 때 시작 페이지 기준으로
+  // PDF 좌표로 변환해 저장한다.
+  let drawing = false;
+  let drawPoints = []; // 그리는 중인 스트로크의 client 좌표 [{x,y}, ...]
+  let drawPreviewPoints = $state([]); // 미리보기 렌더용 스냅샷(rAF로 갱신)
+  let drawStrokeWidthPx = $state(2); // 미리보기 선 굵기(화면 px)
+  let drawPageNumber = 0;
+  let drawPointerId = null;
+  let drawRafId = 0;
+  let drawMoved = false; // 실제로 움직였는가(탭과 스트로크 구분)
+
+  function pageNumberAt(clientX, clientY) {
+    for (const pageView of pageViews()) {
+      if (!pageView?.div) continue;
+      const r = pageView.div.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        return pageView.id;
+      }
+    }
+    return 0;
+  }
+
+  function scheduleDrawPreview() {
+    if (drawRafId) return;
+    drawRafId = requestAnimationFrame(() => {
+      drawRafId = 0;
+      drawPreviewPoints = drawPoints.slice();
+    });
+  }
+
+  // 펜 모드에서 스트로크 시작. 시작점이 페이지 위가 아니면(여백) 무시한다.
+  function onDrawPointerDown(e) {
+    if (!penMode || !itemKey || isInsidePopup(e)) return;
+    const pageNumber = pageNumberAt(e.clientX, e.clientY);
+    if (!pageNumber) return;
+    closePopups();
+    drawing = true;
+    drawMoved = false;
+    drawPageNumber = pageNumber;
+    drawPointerId = e.pointerId;
+    drawPoints = [{ x: e.clientX, y: e.clientY }];
+    const pageView = pageViews()[pageNumber - 1];
+    drawStrokeWidthPx = penWidth * (pageView ? visualScale(pageView) : 1);
+    drawPreviewPoints = drawPoints.slice();
+    try {
+      scrollContainer?.setPointerCapture?.(e.pointerId);
+    } catch {
+      // 포인터 캡처는 편의 기능 — 실패해도 그리기 자체는 이어간다.
+    }
+    e.preventDefault();
+  }
+
+  function onDrawPointerMove(e) {
+    if (!drawing || e.pointerId !== drawPointerId) return;
+    const last = drawPoints[drawPoints.length - 1];
+    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) > 1.5) drawMoved = true;
+    drawPoints.push({ x: e.clientX, y: e.clientY });
+    scheduleDrawPreview();
+    e.preventDefault();
+  }
+
+  function onDrawPointerUp(e) {
+    if (!drawing || e.pointerId !== drawPointerId) return;
+    drawing = false;
+    drawPointerId = null;
+    if (drawRafId) {
+      cancelAnimationFrame(drawRafId);
+      drawRafId = 0;
+    }
+    const points = drawPoints;
+    const pageNumber = drawPageNumber;
+    drawPoints = [];
+    drawPreviewPoints = [];
+
+    // 움직임이 거의 없는 탭이면 스트로크가 아니라 "필기 지우기" 시도로 본다.
+    if (!drawMoved || points.length < 2) {
+      const hit = findInkAt(e.clientX, e.clientY);
+      if (hit) openDeletePopup([hit.key], popupAnchor(tapRect(e)), 'ink');
+      return;
+    }
+    saveInkStroke(points, pageNumber);
+  }
+
+  // 탭 지점 주변의 작은 사각형 — 삭제 팝업 앵커 계산에 popupAnchor가 rect를
+  // 요구하므로, 하이라이트의 selection rect 대신 포인터 지점으로 만든다.
+  function tapRect(e) {
+    return { left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY, width: 0, height: 0 };
+  }
+
+  // client 좌표 스트로크를 시작 페이지 기준 PDF 좌표로 변환해 저장한다.
+  function saveInkStroke(points, pageNumber) {
+    const pageView = pageViews()[pageNumber - 1];
+    if (!pageView?.div || !pageView.viewport || !itemKey) return;
+
+    const pageRect = pageView.div.getBoundingClientRect();
+    const scale = visualScale(pageView);
+    const flat = [];
+    for (const p of points) {
+      const [x, y] = toPdfPoint(p.x, p.y, pageRect, pageView.viewport, scale);
+      flat.push(x, y);
+    }
+    if (flat.length < 4) return;
+
+    const pageIndex = pageView.id - 1;
+    const viewBox = pageView.viewport.viewBox ?? [0, 0, 0, 0];
+    const item = {
+      pageIndex,
+      paths: [flat],
+      width: penWidth,
+      color: INK_COLOR,
+      pageLabel: pageLabels?.[pageIndex] || String(pageIndex + 1),
+      sortIndex: formatSortIndex(pageIndex, 0, viewBox[3] - strokeMaxY(flat)),
+    };
+    paintInk(item);
+  }
+
+  // 하이라이트 paintHighlights와 같은 낙관적 저장 흐름.
+  function paintInk(item) {
+    if (!itemKey) return;
+    const targetItemKey = itemKey;
+    const pendingKey = `${PENDING_KEY_PREFIX}ink${++pendingInkSeq}`;
+    inks = [...inks, { ...item, key: pendingKey }];
+
+    const request = api
+      .createInk(targetItemKey, item)
+      .then((created) => {
+        if (!created?.key || !Array.isArray(created.paths)) {
+          throw new Error('서버가 예상과 다른 응답을 보냈어요');
+        }
+        resolvedInkKeys.set(pendingKey, created.key);
+        if (itemKey === targetItemKey) {
+          inks = inks.map((k) => (k.key === pendingKey ? created : k));
+        }
+        return created;
+      })
+      .catch((err) => {
+        resolvedInkKeys.set(pendingKey, null);
+        inks = inks.filter((k) => k.key !== pendingKey);
+        showHighlightError(`필기를 저장하지 못했어요: ${err.message}`);
+        return null;
+      })
+      .finally(() => pendingInkCreations.delete(pendingKey));
+
+    pendingInkCreations.set(pendingKey, request);
+  }
+
+  // 삭제 확인 팝업의 "필기 지우기" 버튼에서만 실행된다. 하이라이트와 같은
+  // 낙관적 삭제(먼저 화면에서 지우고 실패하면 복원).
+  function removeInk() {
+    const keys = deletePopup?.keys ?? [];
+    closePopups();
+    if (!keys.length || !itemKey) return;
+
+    const targetItemKey = itemKey;
+    const removed = inks.filter((k) => keys.includes(k.key));
+    inks = inks.filter((k) => !keys.includes(k.key));
+
+    for (const ink of removed) deleteInkWhenSaved(targetItemKey, ink);
+  }
+
+  async function deleteInkWhenSaved(targetItemKey, ink) {
+    let key = ink.key;
+    try {
+      if (isPendingKey(key)) {
+        const created = pendingInkCreations.has(key) ? await pendingInkCreations.get(key) : null;
+        const realKey = created?.key ?? resolvedInkKeys.get(key) ?? null;
+        if (!realKey) return;
+        key = realKey;
+      }
+      await api.deleteInk(targetItemKey, key);
+    } catch (err) {
+      if (itemKey === targetItemKey) inks = [...inks, { ...ink, key }];
+      showHighlightError(`필기를 지우지 못했어요: ${err.message}`);
+    }
+  }
+
   async function loadDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
     pdfDocument = await pdfjsLib.getDocument({ url }).promise;
@@ -893,6 +1219,7 @@
       // 실패하면 그냥 물리 페이지 번호(1부터)로 대체한다.
       pageLabels = await doc.getPageLabels().catch(() => null);
       await loadHighlights();
+      await loadInk();
       // 나머지(배율 계산/loading 해제)는 pagesinit 이벤트에서 처리한다.
     } catch (err) {
       error = err.message;
@@ -1014,15 +1341,21 @@
     );
     // 확대/스크롤로 페이지가 다시 그려질 때마다 pdf.js가 페이지 div의 자식을
     // 전부 비우므로(PDFPageView.reset), 우리 하이라이트 레이어도 그때마다 새로 붙인다.
-    eventBus.on('pagerendered', ({ pageNumber }) => safeRenderHighlightLayer(pageNumber), {
-      signal: eventAbort.signal,
-    });
+    eventBus.on(
+      'pagerendered',
+      ({ pageNumber }) => {
+        safeRenderHighlightLayer(pageNumber);
+        safeRenderInkLayer(pageNumber);
+      },
+      { signal: eventAbort.signal }
+    );
     eventBus.on(
       'textlayerrendered',
       ({ pageNumber, error: textLayerError }) => {
         // 텍스트 레이어가 나중에 붙어도 하이라이트가 그 아래로 가도록 순서를
         // 다시 잡아준다(레이어를 지웠다 다시 만들면서 위치가 정해진다).
         safeRenderHighlightLayer(pageNumber);
+        safeRenderInkLayer(pageNumber);
         if (textLayerError) return;
         calibrateTextLayer(pageNumber);
         // textlayerrendered는 임베드 폰트 로딩을 기다리지 않는다 — 캔버스
@@ -1137,13 +1470,19 @@
 
     container.addEventListener('click', onLinkClickCapture, true);
     container.addEventListener('pointerdown', onViewerPointerDown);
+    container.addEventListener('pointermove', onDrawPointerMove);
     container.addEventListener('pointerup', onViewerPointerUp);
+    container.addEventListener('pointerup', onDrawPointerUp);
+    container.addEventListener('pointercancel', onDrawPointerUp);
     container.addEventListener('scroll', onViewerScroll, { passive: true });
 
     return () => {
       container.removeEventListener('click', onLinkClickCapture, true);
       container.removeEventListener('pointerdown', onViewerPointerDown);
+      container.removeEventListener('pointermove', onDrawPointerMove);
       container.removeEventListener('pointerup', onViewerPointerUp);
+      container.removeEventListener('pointerup', onDrawPointerUp);
+      container.removeEventListener('pointercancel', onDrawPointerUp);
       container.removeEventListener('scroll', onViewerScroll);
     };
   });
@@ -1171,9 +1510,27 @@
      완전히 없애 그 데모와 같은 조건으로 맞춘다. -->
 <div
   class="pdfViewer"
+  class:pen-mode={penMode}
   bind:this={viewerEl}
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
 ></div>
+
+<!-- 그리는 중인 스트로크의 실시간 미리보기. 화면(client) 좌표로 그리므로 뷰포트
+     전체를 덮는 position: fixed SVG에 그린다 — 저장된 필기는 페이지별 레이어
+     (folio-ink-layer)에 PDF 좌표로 따로 그린다. pointer-events는 꺼서 그리는
+     동안의 포인터 이벤트가 그대로 스크롤 컨테이너로 가게 둔다. -->
+{#if drawPreviewPoints.length}
+  <svg class="folio-ink-preview" aria-hidden="true">
+    <polyline
+      points={drawPreviewPoints.map((p) => `${p.x},${p.y}`).join(' ')}
+      fill="none"
+      stroke={INK_COLOR}
+      stroke-width={drawStrokeWidthPx}
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
+{/if}
 
 <!-- 형광펜 팝업. 스크롤 컨테이너 안쪽에 있으면 잘려나가므로 position: fixed로
      띄운다 — .pdfViewer(확대 미리보기 transform이 걸리는 요소)의 자식이 아니라
@@ -1253,7 +1610,7 @@
           <p class="popup-hint">{quickPaintHint}</p>
         {/if}
       {:else}
-        <button class="highlight-delete" onclick={removeHighlight}>
+        <button class="highlight-delete" onclick={confirmDelete}>
           <svg
             class="highlight-delete-icon"
             viewBox="0 0 24 24"
@@ -1269,7 +1626,7 @@
             <path d="M6.5 7l.8 11.6A1.5 1.5 0 0 0 8.8 20h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7" />
             <path d="M10.4 10.8v5.6M13.6 10.8v5.6" />
           </svg>
-          형광펜 지우기
+          {popupView.target === 'ink' ? '필기 지우기' : '형광펜 지우기'}
         </button>
       {/if}
     </div>
@@ -1315,6 +1672,38 @@
     border-radius: 1px;
     opacity: 0.42;
     mix-blend-mode: multiply;
+  }
+
+  /* 필기 레이어. 페이지 div 안에 DOM API로 만들어 넣어서 :global로 선언한다.
+     하이라이트와 달리 글자 위에 얹혀야 자연스러워 텍스트 레이어 뒤(=위)에
+     붙인다. 클릭 판정은 좌표로 직접 하므로(findInkAt) 포인터 이벤트는 받지
+     않는다 — 펜 모드 그리기/텍스트 선택을 방해하지 않게 한다. */
+  :global(.folio-ink-layer) {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  /* 그리는 중 실시간 미리보기 — 뷰포트 전체를 덮는 fixed SVG. */
+  .folio-ink-preview {
+    position: fixed;
+    z-index: 35;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+  }
+
+  /* 펜 모드에서는 텍스트 선택을 막고 커서를 십자로 바꿔 "그리는 상태"임을
+     드러낸다. */
+  .pdfViewer.pen-mode {
+    cursor: crosshair;
+  }
+
+  :global(.pdfViewer.pen-mode .textLayer) {
+    user-select: none;
   }
 
   /* 위치만 잡는 래퍼 — 여기엔 애니메이션도 여백도 없다. 그래야 이 요소의

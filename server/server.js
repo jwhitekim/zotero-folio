@@ -38,6 +38,7 @@ import {
   downloadAttachmentFile,
   fetchAttachmentAnnotations,
   createHighlightAnnotation,
+  createInkAnnotation,
 } from './zotero.js';
 import { getRequestToken, buildAuthorizeUrl, getAccessToken } from './oauth1.js';
 
@@ -57,6 +58,9 @@ const MEMO_TAG = 'zotero-insight:memo';
 const HIGHLIGHT_COLORS = ['#ffd400', '#ff6666', '#5fb236', '#2ea8e5', '#a28ae5'];
 // Zotero 스키마가 요구하는 sortIndex 형식 — "페이지|문자오프셋|위에서부터의 거리".
 const SORT_INDEX_PATTERN = /^\d{5}\|\d{6}\|\d{5}$/;
+// 필기(ink) 색은 고정, 굵기는 3단계만 허용 (web/src/utils/pdf-ink.js와 같은 값).
+const INK_COLOR = '#1a1a1a';
+const INK_WIDTHS = [1, 2, 4];
 
 function extractAuthors(creators) {
   if (!creators) return [];
@@ -512,6 +516,116 @@ app.delete('/api/papers/:key/highlights/:annotationKey', async (req, res) => {
     res.status(204).end();
   } catch (err) {
     console.error('[highlights delete] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 필기(ink) ---------------------------------------------------------
+// 하이라이트와 완전히 같은 저장 원칙 — Zotero 표준 annotation 아이템
+// (annotationType: ink)으로만 저장하고 로컬 DB에는 캐시하지 않는다. 하이라이트
+// 라우트와 병렬로 두는 이유: position 구조(paths/width)와 검증 규칙이 서로 달라서,
+// 한 라우트에 annotationType 분기를 얹으면 각각의 검증이 뒤엉켜 오히려 복잡해진다.
+
+function toInk(item) {
+  let position = {};
+  try {
+    position = JSON.parse(item.data.annotationPosition || '{}');
+  } catch {
+    position = {};
+  }
+  return {
+    key: item.key,
+    version: item.version,
+    color: item.data.annotationColor || INK_COLOR,
+    pageLabel: item.data.annotationPageLabel || '',
+    sortIndex: item.data.annotationSortIndex || '',
+    pageIndex: Number.isInteger(position.pageIndex) ? position.pageIndex : 0,
+    width: typeof position.width === 'number' && Number.isFinite(position.width) ? position.width : 2,
+    paths: Array.isArray(position.paths) ? position.paths : [],
+  };
+}
+
+// 스트로크 하나: 짝수 길이의 유한한 숫자 배열([x1,y1,x2,y2,...]).
+function isValidPath(path) {
+  return (
+    Array.isArray(path) &&
+    path.length >= 2 &&
+    path.length % 2 === 0 &&
+    path.every((n) => typeof n === 'number' && Number.isFinite(n))
+  );
+}
+
+app.get('/api/papers/:key/ink', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  try {
+    const annotations = await fetchAttachmentAnnotations(paper.attachmentKey);
+    res.json(
+      annotations
+        .filter((item) => item.data.annotationType === 'ink' && !item.data.deleted)
+        .map(toInk)
+        .filter((ink) => ink.paths.length > 0 && ink.paths.every(isValidPath))
+    );
+  } catch (err) {
+    console.error('[ink list] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/papers/:key/ink', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  const { pageIndex, paths, width, color, pageLabel, sortIndex } = req.body || {};
+  if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+    return res.status(400).json({ error: 'pageIndex(0 이상 정수)가 필요합니다' });
+  }
+  if (!Array.isArray(paths) || paths.length === 0 || !paths.every(isValidPath)) {
+    return res.status(400).json({ error: 'paths([x1,y1,x2,y2,...] 배열)가 필요합니다' });
+  }
+  if (!INK_WIDTHS.includes(width)) {
+    return res.status(400).json({ error: '지원하지 않는 필기 굵기입니다' });
+  }
+  if (color !== INK_COLOR) {
+    return res.status(400).json({ error: '지원하지 않는 필기 색상입니다' });
+  }
+  if (!SORT_INDEX_PATTERN.test(sortIndex || '')) {
+    return res.status(400).json({ error: 'sortIndex 형식이 올바르지 않습니다' });
+  }
+
+  try {
+    const created = await createInkAnnotation(paper.attachmentKey, {
+      color,
+      pageLabel: String(pageLabel || pageIndex + 1).slice(0, 50),
+      sortIndex,
+      position: { pageIndex, width, paths },
+    });
+    res.status(201).json(toInk(created));
+  } catch (err) {
+    console.error('[ink create] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/papers/:key/ink/:annotationKey', async (req, res) => {
+  const paper = getPdfPaper(req.params.key);
+  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
+  try {
+    const item = await fetchItem(req.params.annotationKey);
+    // 지우기 전에 "정말 이 논문 PDF에 달린 필기 annotation인지"를 확인한다.
+    if (
+      item.data.itemType !== 'annotation' ||
+      item.data.annotationType !== 'ink' ||
+      item.data.parentItem !== paper.attachmentKey
+    ) {
+      return res.status(400).json({ error: '이 논문의 필기가 아닙니다' });
+    }
+    await deleteItem(item.key, item.version);
+    res.status(204).end();
+  } catch (err) {
+    console.error('[ink delete] 실패:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

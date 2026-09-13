@@ -5,6 +5,7 @@
   import HtmlViewer from './HtmlViewer.svelte';
   import Icon from './Icon.svelte';
   import { createTouchGestures } from '../utils/touch-gestures.js';
+  import { INK_WIDTHS } from '../utils/pdf-ink.js';
 
   // attachmentType: 'pdf' | 'html' | null. PDF면 pdf.js 엔진(PdfViewer)으로
   // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 HtmlViewer가
@@ -17,6 +18,18 @@
 
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
+
+  // 펜(필기) 모드 상태. PdfPane이 단일 소스로 갖고 PdfViewer에 prop으로 내려준다
+  // (zoom과 같은 방식). penMode가 켜지면 드래그가 텍스트 선택이 아니라 자유
+  // 드로잉으로 해석되고, 터치 팬(스크롤)도 그리기로 가로챈다.
+  // PDF일 때만 의미가 있다(HTML 스냅샷에는 필기 개념 없음 — 하이라이트와 동일).
+  let penMode = $state(false);
+  let penWidth = $state(2); // 기본 "보통"
+
+  // 다른 원문(HTML 등)으로 바뀌면 펜 모드는 꺼둔다.
+  $effect(() => {
+    if (attachmentType !== 'pdf') penMode = false;
+  });
 
   const MIN_ZOOM = 0.5;
   const MAX_ZOOM = 5;
@@ -91,6 +104,7 @@
     getZoom: () => pdfZoom,
     zoomTo,
     getScrollEl: () => pdfScrollEl,
+    isPenMode: () => penMode,
   });
 </script>
 
@@ -110,14 +124,47 @@
     {:else}
       <span></span>
     {/if}
-    <button
-      class="note-collapse-toggle"
-      onclick={onToggleNoteCollapse}
-      aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
-      aria-pressed={noteCollapsed}
-    >
-      <Icon name="panel" size={16} />
-    </button>
+    <div class="viewer-toolbar-right">
+      {#if attachmentType === 'pdf'}
+        <!-- 펜(필기) 토글. 켜면 드래그가 자유 드로잉이 된다. 켜져 있을 때만
+             굵기 선택(얇음/보통/굵음)을 옆에 펼친다 — 형광펜 팝업과 같은 시각 톤. -->
+        {#if penMode}
+          <div class="pen-width-controls" role="radiogroup" aria-label="펜 굵기">
+            {#each INK_WIDTHS as w (w.value)}
+              <button
+                class="pen-width-btn"
+                class:is-active={penWidth === w.value}
+                role="radio"
+                aria-checked={penWidth === w.value}
+                aria-label={`${w.label} 펜`}
+                title={`${w.label} 펜`}
+                onclick={() => (penWidth = w.value)}
+              >
+                <span class="pen-width-dot" style:--dot-size={`${w.value + 3}px`}></span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <button
+          class="pen-toggle"
+          class:is-active={penMode}
+          onclick={() => (penMode = !penMode)}
+          aria-label={penMode ? '펜 끄기' : '펜으로 필기'}
+          aria-pressed={penMode}
+          title={penMode ? '펜 끄기' : '펜으로 필기'}
+        >
+          <Icon name="pen" size={16} />
+        </button>
+      {/if}
+      <button
+        class="note-collapse-toggle"
+        onclick={onToggleNoteCollapse}
+        aria-label={noteCollapsed ? '노트 패널 펼치기' : '노트 패널 접기'}
+        aria-pressed={noteCollapsed}
+      >
+        <Icon name="panel" size={16} />
+      </button>
+    </div>
   </div>
   {#if attachmentType === 'pdf'}
     <div class="viewer-scroll-wrap">
@@ -131,7 +178,7 @@
         onpointerup={touch.up}
         onpointercancel={touch.cancel}
       >
-        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} />
+        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} {penMode} {penWidth} />
       </div>
     </div>
   {:else if attachmentType === 'html'}

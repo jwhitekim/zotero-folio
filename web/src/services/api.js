@@ -33,6 +33,12 @@ export const api = {
   deleteHighlight: (key, annotationKey) =>
     request(`/api/papers/${key}/highlights/${annotationKey}`, { method: 'DELETE' }),
 
+  // 필기(ink) — Zotero annotation 아이템(annotationType: ink)에 직접 읽고 쓴다.
+  listInk: (key) => request(`/api/papers/${key}/ink`),
+  createInk: (key, ink) => request(`/api/papers/${key}/ink`, { method: 'POST', ...jsonBody(ink) }),
+  deleteInk: (key, annotationKey) =>
+    request(`/api/papers/${key}/ink/${annotationKey}`, { method: 'DELETE' }),
+
   listCollections: () => request('/api/collections'),
   listCollectionPapers: (key) => request(`/api/collections/${key}/papers`),
 };

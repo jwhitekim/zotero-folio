@@ -1550,6 +1550,77 @@ a.reader-title svg {
   color: var(--accent);
 }
 
+/* 툴바 오른쪽 묶음 — 펜 토글/굵기 선택/노트 접기 버튼을 한 셀에 모은다
+   (viewer-toolbar 3열 그리드의 마지막 셀). */
+.viewer-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pen-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.pen-toggle:hover {
+  background: var(--accent-pale);
+  color: var(--accent);
+}
+
+.pen-toggle.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 굵기 선택(얇음/보통/굵음). 형광펜 팝업 카드와 같은 시각 톤. */
+.pen-width-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.pen-width-btn {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border-radius: 7px;
+  background: transparent;
+  transition: background 160ms ease;
+}
+
+.pen-width-btn:hover {
+  background: var(--accent-pale);
+}
+
+.pen-width-btn.is-active {
+  background: var(--accent-soft);
+}
+
+.pen-width-dot {
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.pen-width-btn.is-active .pen-width-dot {
+  background: var(--accent);
+}
+
 .note-collapse-toggle {
   display: grid;
   flex: 0 0 auto;

@@ -230,6 +230,50 @@ export async function createHighlightAnnotation(
   return created; // {key, version, data}
 }
 
+// 필기(ink) annotation 아이템을 새로 만든다 (parentItem은 PDF attachment).
+// 하이라이트 생성과 구조가 같고 annotationType/position만 다르다 — 다만
+// 하이라이트 쪽 검증(rects/색상 팔레트)과 섞이지 않도록 별도 래퍼로 둔다.
+export async function createInkAnnotation(
+  attachmentKey,
+  { color, pageLabel, sortIndex, position }
+) {
+  const body = [
+    {
+      itemType: 'annotation',
+      parentItem: attachmentKey,
+      annotationType: 'ink',
+      annotationComment: '',
+      annotationColor: color,
+      annotationPageLabel: pageLabel,
+      annotationSortIndex: sortIndex,
+      // Zotero 스펙상 position은 객체가 아니라 JSON 문자열로 넣어야 한다.
+      annotationPosition: JSON.stringify(position),
+      tags: [],
+    },
+  ];
+
+  const res = await fetch(`${userPrefix()}/items`, {
+    method: 'POST',
+    headers: {
+      ...headers(),
+      'Zotero-Write-Token': writeToken(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Zotero 필기 생성 실패: ${res.status} ${res.statusText}`);
+  }
+
+  const result = await res.json();
+  const created = result.successful?.['0'];
+  if (!created) {
+    throw new Error(`Zotero 필기 생성 실패: ${JSON.stringify(result.failed)}`);
+  }
+  return created; // {key, version, data}
+}
+
 // child note 생성 (parentItem에 귀속).
 export async function createChildNote(parentItemKey, noteHtml, tags) {
   const url = `${userPrefix()}/items`;

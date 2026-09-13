@@ -24,12 +24,17 @@
 //   이벤트는 그 iframe의 getSelection을 넘겨야 그 문서의 선택을 본다.
 // - clientYOffset(): iframe에서 온 이벤트의 clientY를 바깥 문서 좌표로 옮길
 //   보정값(핀치 중심 앵커용). 기본 0(같은 문서).
+// - isPenMode(): 펜(필기) 모드가 켜져 있는지. 켜져 있으면 한 손가락 드래그를
+//   팬(스크롤)으로 쓰지 않고 PdfViewer의 그리기 핸들러에 넘긴다 — 형광펜 모드가
+//   텍스트 선택으로 팬을 대신 막았던 것처럼, 펜 모드 자체가 팬을 막는 신호다.
+//   두 손가락 핀치 확대는 펜 모드에서도 그대로 동작한다.
 export function createTouchGestures({
   getZoom,
   zoomTo,
   getScrollEl,
   getSelection = () => (typeof window !== 'undefined' ? window.getSelection() : null),
   clientYOffset = () => 0,
+  isPenMode = () => false,
 }) {
   const pointers = new Map(); // pointerId -> { x, y }
   // null | 'pan' | 'pinch' | 'select'
@@ -117,7 +122,10 @@ export function createTouchGestures({
       startZoom = getZoom();
       mode = 'pinch';
     } else if (pointers.size === 1) {
-      beginPan({ x: e.clientX, y: e.clientY });
+      // 펜 모드 중 한 손가락은 그리기다 — 팬을 시작하지 않고 PdfViewer의 그리기
+      // 핸들러에 맡긴다.
+      if (isPenMode()) mode = 'draw';
+      else beginPan({ x: e.clientX, y: e.clientY });
     }
   }
 
@@ -135,6 +143,7 @@ export function createTouchGestures({
 
     if (pointers.size !== 1) return;
     if (mode === 'select') return; // 이 드래그는 텍스트 선택 — 끝까지 관여 안 함
+    if (mode === 'draw') return; // 펜 모드 그리기 — 팬하지 않고 그리기 핸들러에 맡긴다
 
     // 한 손가락 드래그가 텍스트 선택인지 판별한다. 태블릿에서 텍스트 선택은
     // 길게 누르기(long-press)로 시작되므로, 손가락이 실제로 움직이기 시작할
@@ -168,8 +177,10 @@ export function createTouchGestures({
       startZoom = getZoom();
       mode = 'pinch';
     } else if (pointers.size === 1) {
-      // 핀치 → 한 손가락: 남은 손가락으로 팬을 이어간다(튐 방지 위해 좌표 리셋).
-      beginPan(twoPoints()[0]);
+      // 핀치 → 한 손가락: 펜 모드면 그리기로, 아니면 남은 손가락으로 팬을
+      // 이어간다(튐 방지 위해 좌표 리셋).
+      if (isPenMode()) mode = 'draw';
+      else beginPan(twoPoints()[0]);
     } else {
       mode = null;
       cancelPending();

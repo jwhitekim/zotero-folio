@@ -69,5 +69,7 @@
     <path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
+  {:else if name === 'pen'}
+    <path d="M15.5 5.5 18.5 8.5M4 20l1-4L16 5a1.8 1.8 0 0 1 2.5 0l.5.5a1.8 1.8 0 0 1 0 2.5L8 19l-4 1Z" />
   {/if}
 </svg>
