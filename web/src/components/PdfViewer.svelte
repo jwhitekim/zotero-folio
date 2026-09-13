@@ -39,7 +39,17 @@
   // itemKey: 하이라이트를 읽고 쓸 논문 키. 없으면 형광펜 기능만 조용히 꺼진다.
   // penMode: 부모(PdfPane)가 단일 소스로 갖는 펜(필기) 모드. 켜지면 드래그가
   // 텍스트 선택이 아니라 자유 드로잉이 된다. penWidth: 선 굵기(PDF pt).
-  let { src, zoom = 1, scrollContainer, itemKey = null, penMode = false, penWidth = 2 } = $props();
+  // eraserMode: 지우개 모드. 켜지면 드래그 경로에 닿는 필기 스트로크를 확인
+  // 팝업 없이 즉시 지운다. 펜/지우개는 부모에서 상호 배타로 관리된다.
+  let {
+    src,
+    zoom = 1,
+    scrollContainer,
+    itemKey = null,
+    penMode = false,
+    penWidth = 2,
+    eraserMode = false,
+  } = $props();
 
   let viewerEl = $state();
   let loading = $state(true);
@@ -648,6 +658,31 @@
     return null;
   }
 
+  // 화면 좌표에 닿는 필기 스트로크의 key를 전부 모은다(지우개 드래그용 — 한
+  // 지점에 여러 스트로크가 겹쳐 있을 수 있다). findInkAt과 판정 기준은 같다.
+  function findInkKeysAt(clientX, clientY) {
+    const keys = [];
+    for (const pageView of pageViews()) {
+      if (!pageView?.div || !pageView.viewport) continue;
+      const pageIndex = pageView.id - 1;
+      const items = inks.filter((k) => k.pageIndex === pageIndex && Array.isArray(k.paths) && k.paths.length);
+      if (!items.length) continue;
+      const pageRect = pageView.div.getBoundingClientRect();
+      const scale = visualScale(pageView);
+      for (const ink of items) {
+        const tolerance = Math.max(10, (ink.width * scale) / 2 + 8);
+        for (const stroke of ink.paths) {
+          const pts = strokeToClientPoints(stroke, pageRect, pageView.viewport, scale);
+          if (pts.length && isPointNearStroke(clientX, clientY, pts, tolerance)) {
+            keys.push(ink.key);
+            break; // 이 annotation은 이미 걸렸다 — 다른 스트로크는 볼 필요 없다.
+          }
+        }
+      }
+    }
+    return keys;
+  }
+
   // 선택 영역을 "페이지별 하이라이트 1개"로 쪼갠다. 페이지를 걸쳐 드래그하면
   // Zotero annotation의 position이 페이지 하나만 담을 수 있으므로 페이지 수만큼
   // 나눠서 만든다.
@@ -765,8 +800,10 @@
     try {
       if (isInsidePopup(e)) return;
       closePopups();
-      // 펜 모드면 이 pointerdown부터 스트로크를 시작한다.
+      // 펜 모드면 이 pointerdown부터 스트로크를 시작하고, 지우개 모드면 지우기를
+      // 시작한다(둘은 상호 배타).
       if (penMode) onDrawPointerDown(e);
+      else if (eraserMode) onErasePointerDown(e);
     } catch (err) {
       console.warn('[PdfViewer] 팝업 닫기 실패', err);
       colorPopup = null;
@@ -830,9 +867,9 @@
 
   function handleViewerPointerUp(e) {
     if (!itemKey || isInsidePopup(e)) return;
-    // 펜 모드의 pointerup은 그리기 핸들러(onDrawPointerUp)가 전담한다 —
-    // 여기서 형광펜/선택 로직을 돌리지 않는다.
-    if (penMode) return;
+    // 펜/지우개 모드의 pointerup은 각 전용 핸들러가 전담한다 — 여기서
+    // 형광펜/선택 로직을 돌리지 않는다.
+    if (penMode || eraserMode) return;
 
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -1184,6 +1221,56 @@
     }
   }
 
+  // --- 지우개 -----------------------------------------------------------
+  // 지우개 모드에서 드래그 경로에 닿는 필기 스트로크를 확인 팝업 없이 즉시
+  // 지운다. 지나가는 순간 바로 지워지도록 pointermove마다 그 지점을 히트테스트
+  // 한다. 삭제는 낙관적(화면에서 먼저 지우고 백그라운드로 Zotero DELETE) —
+  // 필기 삭제와 같은 deleteInkWhenSaved 경로를 그대로 쓴다.
+  let erasing = false;
+  let erasePointerId = null;
+  // 이번 드래그에서 이미 지운 key — 같은 스트로크를 중복 삭제 요청하지 않는다.
+  const erasedInDrag = new Set();
+
+  function eraseAt(clientX, clientY) {
+    if (!itemKey) return;
+    const targetItemKey = itemKey;
+    const keys = findInkKeysAt(clientX, clientY).filter((k) => !erasedInDrag.has(k));
+    if (!keys.length) return;
+    for (const key of keys) erasedInDrag.add(key);
+    const removed = inks.filter((k) => keys.includes(k.key));
+    inks = inks.filter((k) => !keys.includes(k.key));
+    // 여러 획이 한 번에 걸려도 각각 독립적으로 삭제 — 하나 실패해도 나머지는 유지.
+    for (const ink of removed) deleteInkWhenSaved(targetItemKey, ink);
+  }
+
+  function onErasePointerDown(e) {
+    if (!eraserMode || !itemKey || isInsidePopup(e)) return;
+    closePopups();
+    erasing = true;
+    erasePointerId = e.pointerId;
+    erasedInDrag.clear();
+    try {
+      scrollContainer?.setPointerCapture?.(e.pointerId);
+    } catch {
+      // 포인터 캡처 실패해도 지우개 자체는 이어간다.
+    }
+    eraseAt(e.clientX, e.clientY);
+    e.preventDefault();
+  }
+
+  function onErasePointerMove(e) {
+    if (!erasing || e.pointerId !== erasePointerId) return;
+    eraseAt(e.clientX, e.clientY);
+    e.preventDefault();
+  }
+
+  function onErasePointerUp(e) {
+    if (!erasing || e.pointerId !== erasePointerId) return;
+    erasing = false;
+    erasePointerId = null;
+    erasedInDrag.clear();
+  }
+
   async function loadDocument(url) {
     if (pdfDocument && loadedSrc === url) return pdfDocument;
     pdfDocument = await pdfjsLib.getDocument({ url }).promise;
@@ -1471,18 +1558,24 @@
     container.addEventListener('click', onLinkClickCapture, true);
     container.addEventListener('pointerdown', onViewerPointerDown);
     container.addEventListener('pointermove', onDrawPointerMove);
+    container.addEventListener('pointermove', onErasePointerMove);
     container.addEventListener('pointerup', onViewerPointerUp);
     container.addEventListener('pointerup', onDrawPointerUp);
+    container.addEventListener('pointerup', onErasePointerUp);
     container.addEventListener('pointercancel', onDrawPointerUp);
+    container.addEventListener('pointercancel', onErasePointerUp);
     container.addEventListener('scroll', onViewerScroll, { passive: true });
 
     return () => {
       container.removeEventListener('click', onLinkClickCapture, true);
       container.removeEventListener('pointerdown', onViewerPointerDown);
       container.removeEventListener('pointermove', onDrawPointerMove);
+      container.removeEventListener('pointermove', onErasePointerMove);
       container.removeEventListener('pointerup', onViewerPointerUp);
       container.removeEventListener('pointerup', onDrawPointerUp);
+      container.removeEventListener('pointerup', onErasePointerUp);
       container.removeEventListener('pointercancel', onDrawPointerUp);
+      container.removeEventListener('pointercancel', onErasePointerUp);
       container.removeEventListener('scroll', onViewerScroll);
     };
   });
@@ -1511,6 +1604,7 @@
 <div
   class="pdfViewer"
   class:pen-mode={penMode}
+  class:eraser-mode={eraserMode}
   bind:this={viewerEl}
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
 ></div>
@@ -1702,7 +1796,13 @@
     cursor: crosshair;
   }
 
-  :global(.pdfViewer.pen-mode .textLayer) {
+  /* 지우개 모드 커서 — 십자와 구분되게 cell 커서로 "지우는 중"임을 드러낸다. */
+  .pdfViewer.eraser-mode {
+    cursor: cell;
+  }
+
+  :global(.pdfViewer.pen-mode .textLayer),
+  :global(.pdfViewer.eraser-mode .textLayer) {
     user-select: none;
   }
 

@@ -25,10 +25,25 @@
   // PDF일 때만 의미가 있다(HTML 스냅샷에는 필기 개념 없음 — 하이라이트와 동일).
   let penMode = $state(false);
   let penWidth = $state(2); // 기본 "보통"
+  // 지우개 모드. 펜과 상호 배타(라디오 버튼처럼 하나 켜면 다른 하나는 꺼짐).
+  let eraserMode = $state(false);
 
-  // 다른 원문(HTML 등)으로 바뀌면 펜 모드는 꺼둔다.
+  function togglePen() {
+    penMode = !penMode;
+    if (penMode) eraserMode = false;
+  }
+
+  function toggleEraser() {
+    eraserMode = !eraserMode;
+    if (eraserMode) penMode = false;
+  }
+
+  // 다른 원문(HTML 등)으로 바뀌면 펜/지우개 모드는 꺼둔다.
   $effect(() => {
-    if (attachmentType !== 'pdf') penMode = false;
+    if (attachmentType !== 'pdf') {
+      penMode = false;
+      eraserMode = false;
+    }
   });
 
   const MIN_ZOOM = 0.5;
@@ -104,7 +119,9 @@
     getZoom: () => pdfZoom,
     zoomTo,
     getScrollEl: () => pdfScrollEl,
-    isPenMode: () => penMode,
+    // 펜/지우개 어느 쪽이든 그리기 도구가 켜져 있으면 한 손가락 팬을 막고
+    // 그리기/지우기 핸들러에 넘긴다.
+    isPenMode: () => penMode || eraserMode,
   });
 </script>
 
@@ -148,12 +165,24 @@
         <button
           class="pen-toggle"
           class:is-active={penMode}
-          onclick={() => (penMode = !penMode)}
+          onclick={togglePen}
           aria-label={penMode ? '펜 끄기' : '펜으로 필기'}
           aria-pressed={penMode}
           title={penMode ? '펜 끄기' : '펜으로 필기'}
         >
           <Icon name="pen" size={16} />
+        </button>
+        <!-- 지우개 토글. 켜면 드래그 경로에 닿는 필기를 확인 없이 즉시 지운다.
+             펜과 상호 배타(togglePen/toggleEraser가 서로 끈다). -->
+        <button
+          class="pen-toggle"
+          class:is-active={eraserMode}
+          onclick={toggleEraser}
+          aria-label={eraserMode ? '지우개 끄기' : '필기 지우개'}
+          aria-pressed={eraserMode}
+          title={eraserMode ? '지우개 끄기' : '필기 지우개'}
+        >
+          <Icon name="eraser" size={16} />
         </button>
       {/if}
       <button
@@ -178,7 +207,7 @@
         onpointerup={touch.up}
         onpointercancel={touch.cancel}
       >
-        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} {penMode} {penWidth} />
+        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} {penMode} {penWidth} {eraserMode} />
       </div>
     </div>
   {:else if attachmentType === 'html'}
