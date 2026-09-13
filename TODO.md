@@ -3,6 +3,7 @@
 ## 진행 중
 
 ## 완료
+- [x] Zotero ink annotation 실제 데이터 형식 확인 — 사용자가 만든 샘플을 API로 조회해 확정. `annotationPosition = {pageIndex, width, paths}`, `width`는 굵기(스트로크 공통 1개), `paths`는 `number[][]`(스트로크별 평탄화 좌표). `docs/pdf-ink-annotation-research.md`에 기록, `d04b693` 푸시 완료
 - [x] 작업 디렉터리를 프로젝트 루트로 고정하는 규칙 + 루트 빌드 스크립트 추가 — Stop 훅이 `cd web` 이후 작업 디렉터리 복귀 누락으로 상대경로를 못 찾아 실패한 사고 재발 방지. `.claude/CLAUDE.md`에 규칙 기록, 루트 `package.json`에 `npm run build`(재빌드용, 빠름) 추가
 - [x] 모바일 하단 탭바 다크 모드 글자 안 보이는 문제 수정 — 탭바 배경(고정 흰 유리 재질)은 테마 무관 고정인데 아이콘/글자 색이 테마 변수(`--text-muted`/`--accent`)를 써서 다크 모드에서 밝은 글자가 밝은 배경과 겹쳐 안 보였음. `.tab-btn`/`.search-fab` 색상을 라이트 모드 값으로 고정. 빌드 통과 확인
 - [x] 하이라이트 팝업/사파리 콜아웃 겹침 대응 — 팝업 아래-우선 배치(`442a5f7`)로 실질적 겹침 해결 확인, 복사 버튼 추가(`1d08d2b`), 의도대로 작동 안 한 선택-제거 코드는 정리(`489ad5d`). 실기기 확인 완료
@@ -16,4 +17,3 @@
 - [x] Alt+← 단축키 리스너가 쓰다가 꺼지는 버그 원인 파악 — `PdfViewer.svelte`의 `setupDone` 게이트 `$effect`(874~1048줄) 안에 `popstate`/`keydown`(Alt+←) 리스너가 등록돼 있는데, 이 effect가 읽는 `scrollContainer`/`viewerEl`이 나중에 바뀌면 Svelte가 cleanup만 실행하고 본문은 `setupDone` 때문에 early return 해 리스너가 재등록되지 않음. 형광펜 리스너는 이미 같은 이유로 별도 effect로 분리돼 있으나(1059줄 근처) Alt+← 리스너는 아직 그대로 남아 같은 버그를 가짐. 수정 여부는 사용자 확인 대기
 
 ## 보류 (사용자 확인 필요)
-- [?] Zotero ink annotation 실제 데이터 형식 확인 (사용자가 Zotero 데스크톱에서 샘플 ink 생성해줄 때까지 대기)
