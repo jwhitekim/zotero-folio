@@ -81,6 +81,26 @@ ZOTERO_USER_ID=
 PORT=3002
 ```
 
+## 작업 디렉터리
+
+**셸 작업 디렉터리는 항상 프로젝트 루트(`zotero-folio/`)로 유지한다.**
+`.claude/hooks/*.sh`(Stop/SessionStart 훅)가 상대경로로 실행되기 때문에,
+`cd web && ...`처럼 작업 디렉터리를 바꾼 채로 두면 다음 훅 실행 시
+`.claude/hooks/check-todo.sh` 같은 경로를 `web/.claude/hooks/...`에서
+찾아 "No such file or directory"로 실패한다(실제로 겪은 사고).
+`web/` 안에서 명령이 필요하면 `cd web && <명령>` 대신 서브셸
+`(cd web && <명령>)`을 쓰거나, 명령 종료 후 바로 루트로 돌아온다.
+PDF 뷰어 등을 빌드 확인할 때는 아래 "빌드"의 루트 스크립트를 쓴다.
+
+## 빌드
+
+프론트엔드(`web/`) 빌드는 루트에서 `cd` 없이 실행한다:
+
+```bash
+npm run build       # web/dist만 재생성 (평소 확인용, 빠름)
+npm run build:web   # web 의존성 설치 + 빌드 (npm install 필요할 때)
+```
+
 ## 코딩 컨벤션
 
 - 이전 프로젝트(my-dictionary)와 동일한 스타일 유지: ESM(`import`),

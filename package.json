@@ -6,6 +6,7 @@
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
+    "build": "npm --prefix web run build",
     "build:web": "npm --prefix web install && npm --prefix web run build"
   },
   "engines": {
