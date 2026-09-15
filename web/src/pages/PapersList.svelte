@@ -54,7 +54,12 @@
   function toggleAddForm() {
     showAddForm = !showAddForm;
     addError = '';
-    if (showAddForm) queueMicrotask(() => addUrlInput?.focus());
+    // 터치(태블릿 등) 환경에서는 폼이 열리자마자 자동 포커스를 주면 그 즉시
+    // 가상 키보드가 뜨면서 뷰포트가 줄어들어 목록 스크롤이 먹통이 되는
+    // 현상이 있었다 — 터치 환경에서는 자동 포커스를 하지 않고 사용자가
+    // 직접 탭해서 포커스하게 둔다. 마우스 환경(포인터 정밀)에서는 기존대로 유지.
+    const isTouch = window.matchMedia('(pointer: coarse)').matches;
+    if (showAddForm && !isTouch) queueMicrotask(() => addUrlInput?.focus());
   }
 
   async function submitWebpage() {
