@@ -21,4 +21,4 @@
 - [x] Alt+← 단축키 리스너가 쓰다가 꺼지는 버그 원인 파악 — `PdfViewer.svelte`의 `setupDone` 게이트 `$effect`(874~1048줄) 안에 `popstate`/`keydown`(Alt+←) 리스너가 등록돼 있는데, 이 effect가 읽는 `scrollContainer`/`viewerEl`이 나중에 바뀌면 Svelte가 cleanup만 실행하고 본문은 `setupDone` 때문에 early return 해 리스너가 재등록되지 않음. 형광펜 리스너는 이미 같은 이유로 별도 effect로 분리돼 있으나(1059줄 근처) Alt+← 리스너는 아직 그대로 남아 같은 버그를 가짐. 수정 여부는 사용자 확인 대기
 
 ## 보류 (사용자 확인 필요)
-- [?] 웹페이지 추가 폼 열자마자 태블릿에서 목록 스크롤 안 되는 문제 — 정적 코드 분석으론 모달/스크롤 잠금 코드 자체가 없어 확정 원인 못 찾음. 폼 열릴 때 자동 포커스가 즉시 가상 키보드를 띄우는 게 유력해 터치 환경에서는 자동 포커스를 끄도록 수정(`5fdab6a`), 실제로 증상이 해결되는지 태블릿에서 확인 필요
+- [?] 태블릿 Safari에서 HTML 원문 뷰어(`HtmlViewer.svelte`) 스크롤이 전혀 안 되는 문제 — 처음엔 "Papers 목록 스크롤" 문제로 오인해 웹페이지 추가 폼 자동 포커스를 의심하고 수정했으나(`5fdab6a`) 실제 증상과 무관해 되돌림(`a27afe8`). 실제로는 저장된 모든 HTML 스냅샷 문서에서 공통으로 재현(콘텐츠는 정상 로드, 스크롤만 안 됨). PDF 뷰어는 정상이라 `touch-gestures.js` 공용 로직 자체보다 `HtmlViewer.svelte`가 iframe 내부 window에 붙이는 `iframeTouch` 경로(sandbox 제약, 리스너 등록 타이밍 등)를 의심 중 — 원인 조사 필요
