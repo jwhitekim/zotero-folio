@@ -15,6 +15,20 @@ export const INK_WIDTHS = [
   { value: 4, label: '굵음' },
 ];
 
+// 프리핸드 형광펜 색. 텍스트 드래그 형광펜(pdf-highlight.js의 HIGHLIGHT_COLORS,
+// 노랑 #ffd400)과 헷갈리지 않게 살짝 다른 앰버 톤을 쓴다 — 렌더링/서버 검증은
+// 이 색으로 "펜이냐 형광펜이냐"를 가르므로 펜색(#1a1a1a)과도 반드시 달라야 한다.
+export const HIGHLIGHTER_INK_COLOR = '#ffd54f';
+
+// 형광펜 전용 굵기 3단계. 펜(1/2/4pt)보다 확실히 굵어야 형광펜답게 보인다.
+// 값은 펜과 같은 PDF 좌표(pt) 기준이며 INK_WIDTHS와 겹치지 않는다 — 서버는
+// 색으로 어느 굵기 목록을 검사할지 고른다.
+export const HIGHLIGHTER_WIDTHS = [
+  { value: 8, label: '얇음' },
+  { value: 12, label: '보통' },
+  { value: 18, label: '굵음' },
+];
+
 function round3(n) {
   return Math.round(n * 1000) / 1000;
 }

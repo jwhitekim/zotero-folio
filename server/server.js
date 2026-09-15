@@ -58,9 +58,14 @@ const MEMO_TAG = 'zotero-insight:memo';
 const HIGHLIGHT_COLORS = ['#ffd400', '#ff6666', '#5fb236', '#2ea8e5', '#a28ae5'];
 // Zotero 스키마가 요구하는 sortIndex 형식 — "페이지|문자오프셋|위에서부터의 거리".
 const SORT_INDEX_PATTERN = /^\d{5}\|\d{6}\|\d{5}$/;
-// 필기(ink) 색은 고정, 굵기는 3단계만 허용 (web/src/utils/pdf-ink.js와 같은 값).
+// 필기(ink) 색/굵기는 두 도구가 같은 ink 파이프라인을 공유한다 — 펜과
+// 프리핸드 형광펜. 색으로 어느 도구인지 가르고, 색에 맞는 굵기 목록만 허용한다
+// (web/src/utils/pdf-ink.js와 같은 값).
 const INK_COLOR = '#1a1a1a';
 const INK_WIDTHS = [1, 2, 4];
+const HIGHLIGHTER_INK_COLOR = '#ffd54f';
+const HIGHLIGHTER_WIDTHS = [8, 12, 18];
+const INK_COLORS = [INK_COLOR, HIGHLIGHTER_INK_COLOR];
 
 function extractAuthors(creators) {
   if (!creators) return [];
@@ -584,11 +589,14 @@ app.post('/api/papers/:key/ink', async (req, res) => {
   if (!Array.isArray(paths) || paths.length === 0 || !paths.every(isValidPath)) {
     return res.status(400).json({ error: 'paths([x1,y1,x2,y2,...] 배열)가 필요합니다' });
   }
-  if (!INK_WIDTHS.includes(width)) {
-    return res.status(400).json({ error: '지원하지 않는 필기 굵기입니다' });
-  }
-  if (color !== INK_COLOR) {
+  if (!INK_COLORS.includes(color)) {
     return res.status(400).json({ error: '지원하지 않는 필기 색상입니다' });
+  }
+  // 색으로 도구를 가른 뒤, 그 도구가 허용하는 굵기인지만 본다 — 펜에 형광펜
+  // 굵기를 넣거나 그 반대인 경우를 막는다.
+  const allowedWidths = color === HIGHLIGHTER_INK_COLOR ? HIGHLIGHTER_WIDTHS : INK_WIDTHS;
+  if (!allowedWidths.includes(width)) {
+    return res.status(400).json({ error: '지원하지 않는 필기 굵기입니다' });
   }
   if (!SORT_INDEX_PATTERN.test(sortIndex || '')) {
     return res.status(400).json({ error: 'sortIndex 형식이 올바르지 않습니다' });

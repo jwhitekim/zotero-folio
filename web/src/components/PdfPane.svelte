@@ -5,7 +5,7 @@
   import HtmlViewer from './HtmlViewer.svelte';
   import Icon from './Icon.svelte';
   import { createTouchGestures } from '../utils/touch-gestures.js';
-  import { INK_WIDTHS } from '../utils/pdf-ink.js';
+  import { INK_WIDTHS, HIGHLIGHTER_WIDTHS } from '../utils/pdf-ink.js';
 
   // attachmentType: 'pdf' | 'html' | null. PDF면 pdf.js 엔진(PdfViewer)으로
   // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 HtmlViewer가
@@ -25,24 +25,43 @@
   // PDF일 때만 의미가 있다(HTML 스냅샷에는 필기 개념 없음 — 하이라이트와 동일).
   let penMode = $state(false);
   let penWidth = $state(2); // 기본 "보통"
-  // 지우개 모드. 펜과 상호 배타(라디오 버튼처럼 하나 켜면 다른 하나는 꺼짐).
+  // 지우개 모드. 펜/형광펜과 상호 배타(라디오 버튼처럼 하나 켜면 나머지는 꺼짐).
   let eraserMode = $state(false);
+  // 프리핸드 형광펜 모드. 펜/지우개와 상호 배타인 3번째 그리기 도구.
+  // 드래그를 수평 막대로 스냅해 형광펜색(반투명)으로 그린다.
+  let highlighterPenMode = $state(false);
+  let highlighterWidth = $state(12); // 기본 "보통"
 
   function togglePen() {
     penMode = !penMode;
-    if (penMode) eraserMode = false;
+    if (penMode) {
+      eraserMode = false;
+      highlighterPenMode = false;
+    }
   }
 
   function toggleEraser() {
     eraserMode = !eraserMode;
-    if (eraserMode) penMode = false;
+    if (eraserMode) {
+      penMode = false;
+      highlighterPenMode = false;
+    }
   }
 
-  // 다른 원문(HTML 등)으로 바뀌면 펜/지우개 모드는 꺼둔다.
+  function toggleHighlighterPen() {
+    highlighterPenMode = !highlighterPenMode;
+    if (highlighterPenMode) {
+      penMode = false;
+      eraserMode = false;
+    }
+  }
+
+  // 다른 원문(HTML 등)으로 바뀌면 그리기 도구는 전부 꺼둔다.
   $effect(() => {
     if (attachmentType !== 'pdf') {
       penMode = false;
       eraserMode = false;
+      highlighterPenMode = false;
     }
   });
 
@@ -121,7 +140,7 @@
     getScrollEl: () => pdfScrollEl,
     // 펜/지우개 어느 쪽이든 그리기 도구가 켜져 있으면 한 손가락 팬을 막고
     // 그리기/지우기 핸들러에 넘긴다.
-    isPenMode: () => penMode || eraserMode,
+    isPenMode: () => penMode || eraserMode || highlighterPenMode,
   });
 </script>
 
@@ -172,8 +191,37 @@
         >
           <Icon name="pen" size={16} />
         </button>
+        <!-- 형광펜(프리핸드) 토글. 켜면 드래그가 수평 막대로 스냅돼 반투명
+             형광펜으로 그려진다. 켜져 있을 때만 형광펜 전용 굵기 선택을 펼친다. -->
+        {#if highlighterPenMode}
+          <div class="pen-width-controls" role="radiogroup" aria-label="형광펜 굵기">
+            {#each HIGHLIGHTER_WIDTHS as w (w.value)}
+              <button
+                class="pen-width-btn"
+                class:is-active={highlighterWidth === w.value}
+                role="radio"
+                aria-checked={highlighterWidth === w.value}
+                aria-label={`${w.label} 형광펜`}
+                title={`${w.label} 형광펜`}
+                onclick={() => (highlighterWidth = w.value)}
+              >
+                <span class="pen-width-dot" style:--dot-size={`${w.value / 2 + 3}px`}></span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <button
+          class="pen-toggle"
+          class:is-active={highlighterPenMode}
+          onclick={toggleHighlighterPen}
+          aria-label={highlighterPenMode ? '형광펜 끄기' : '형광펜으로 칠하기'}
+          aria-pressed={highlighterPenMode}
+          title={highlighterPenMode ? '형광펜 끄기' : '형광펜으로 칠하기'}
+        >
+          <Icon name="highlighter" size={16} />
+        </button>
         <!-- 지우개 토글. 켜면 드래그 경로에 닿는 필기를 확인 없이 즉시 지운다.
-             펜과 상호 배타(togglePen/toggleEraser가 서로 끈다). -->
+             펜/형광펜과 상호 배타(toggle 함수들이 서로 끈다). -->
         <button
           class="pen-toggle"
           class:is-active={eraserMode}
@@ -207,7 +255,7 @@
         onpointerup={touch.up}
         onpointercancel={touch.cancel}
       >
-        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} {penMode} {penWidth} {eraserMode} />
+        <PdfViewer src={contentUrl} zoom={pdfZoom} scrollContainer={pdfScrollEl} {itemKey} {penMode} {penWidth} {eraserMode} {highlighterPenMode} {highlighterWidth} />
       </div>
     </div>
   {:else if attachmentType === 'html'}

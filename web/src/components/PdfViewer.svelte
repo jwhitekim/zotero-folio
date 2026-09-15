@@ -23,6 +23,7 @@
   } from '../utils/pdf-highlight.js';
   import {
     INK_COLOR,
+    HIGHLIGHTER_INK_COLOR,
     toPdfPoint,
     strokeToPagePath,
     strokeToClientPoints,
@@ -49,6 +50,10 @@
     penMode = false,
     penWidth = 2,
     eraserMode = false,
+    // highlighterPenMode: 프리핸드 형광펜 모드. 펜과 같은 그리기 경로를 쓰되
+    // 드래그를 수평 막대로 스냅하고 형광펜색(반투명)으로 저장/렌더한다.
+    highlighterPenMode = false,
+    highlighterWidth = 12,
   } = $props();
 
   let viewerEl = $state();
@@ -581,6 +586,10 @@
 
     const children = [];
     for (const ink of items) {
+      // 형광펜(색으로 구분)은 반투명 + multiply 혼합으로 글자 위에 자연스럽게
+      // 겹치고, 굵기도 자체(HIGHLIGHTER_WIDTHS)가 커서 그대로 두꺼워진다. 펜은
+      // 기존 그대로(불투명·round). 형광펜은 막대 끝이 튀지 않게 butt 캡을 쓴다.
+      const isHighlighter = ink.color === HIGHLIGHTER_INK_COLOR;
       for (const stroke of ink.paths) {
         const d = strokeToPagePath(stroke, pageView.viewport, scale);
         if (!d) continue;
@@ -589,8 +598,12 @@
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', ink.color);
         path.setAttribute('stroke-width', String(ink.width * scale));
-        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linecap', isHighlighter ? 'butt' : 'round');
         path.setAttribute('stroke-linejoin', 'round');
+        if (isHighlighter) {
+          path.style.opacity = '0.4';
+          path.style.mixBlendMode = 'multiply';
+        }
         path.dataset.inkKey = ink.key;
         children.push(path);
       }
@@ -802,7 +815,7 @@
       closePopups();
       // 펜 모드면 이 pointerdown부터 스트로크를 시작하고, 지우개 모드면 지우기를
       // 시작한다(둘은 상호 배타).
-      if (penMode) onDrawPointerDown(e);
+      if (penMode || highlighterPenMode) onDrawPointerDown(e);
       else if (eraserMode) onErasePointerDown(e);
     } catch (err) {
       console.warn('[PdfViewer] 팝업 닫기 실패', err);
@@ -869,7 +882,7 @@
     if (!itemKey || isInsidePopup(e)) return;
     // 펜/지우개 모드의 pointerup은 각 전용 핸들러가 전담한다 — 여기서
     // 형광펜/선택 로직을 돌리지 않는다.
-    if (penMode || eraserMode) return;
+    if (penMode || eraserMode || highlighterPenMode) return;
 
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -1051,6 +1064,9 @@
   let drawPoints = []; // 그리는 중인 스트로크의 client 좌표 [{x,y}, ...]
   let drawPreviewPoints = $state([]); // 미리보기 렌더용 스냅샷(rAF로 갱신)
   let drawStrokeWidthPx = $state(2); // 미리보기 선 굵기(화면 px)
+  // 이번 스트로크가 형광펜인지. 형광펜이면 드래그를 수평 막대로 스냅하고
+  // 미리보기/저장 색을 형광펜색으로 바꾼다(반투명 렌더는 미리보기 SVG가 처리).
+  let drawIsHighlighter = $state(false);
   let drawPageNumber = 0;
   let drawPointerId = null;
   let drawRafId = 0;
@@ -1077,17 +1093,19 @@
 
   // 펜 모드에서 스트로크 시작. 시작점이 페이지 위가 아니면(여백) 무시한다.
   function onDrawPointerDown(e) {
-    if (!penMode || !itemKey || isInsidePopup(e)) return;
+    if ((!penMode && !highlighterPenMode) || !itemKey || isInsidePopup(e)) return;
     const pageNumber = pageNumberAt(e.clientX, e.clientY);
     if (!pageNumber) return;
     closePopups();
     drawing = true;
     drawMoved = false;
+    drawIsHighlighter = highlighterPenMode;
     drawPageNumber = pageNumber;
     drawPointerId = e.pointerId;
     drawPoints = [{ x: e.clientX, y: e.clientY }];
     const pageView = pageViews()[pageNumber - 1];
-    drawStrokeWidthPx = penWidth * (pageView ? visualScale(pageView) : 1);
+    const strokeWidth = drawIsHighlighter ? highlighterWidth : penWidth;
+    drawStrokeWidthPx = strokeWidth * (pageView ? visualScale(pageView) : 1);
     drawPreviewPoints = drawPoints.slice();
     try {
       scrollContainer?.setPointerCapture?.(e.pointerId);
@@ -1099,9 +1117,17 @@
 
   function onDrawPointerMove(e) {
     if (!drawing || e.pointerId !== drawPointerId) return;
-    const last = drawPoints[drawPoints.length - 1];
-    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) > 1.5) drawMoved = true;
-    drawPoints.push({ x: e.clientX, y: e.clientY });
+    if (drawIsHighlighter) {
+      // 형광펜은 시작점 y에 고정한 수평 막대로 스냅한다 — 삐뚤게 그어도 항상
+      // [시작점, {끝x, 시작y}] 두 점만 유지해 곧은 막대로 보이고 저장된다.
+      const start = drawPoints[0];
+      if (Math.abs(e.clientX - start.x) > 1.5) drawMoved = true;
+      drawPoints = [start, { x: e.clientX, y: start.y }];
+    } else {
+      const last = drawPoints[drawPoints.length - 1];
+      if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) > 1.5) drawMoved = true;
+      drawPoints.push({ x: e.clientX, y: e.clientY });
+    }
     scheduleDrawPreview();
     e.preventDefault();
   }
@@ -1116,6 +1142,7 @@
     }
     const points = drawPoints;
     const pageNumber = drawPageNumber;
+    const isHighlighter = drawIsHighlighter;
     drawPoints = [];
     drawPreviewPoints = [];
 
@@ -1125,7 +1152,7 @@
       if (hit) openDeletePopup([hit.key], popupAnchor(tapRect(e)), 'ink');
       return;
     }
-    saveInkStroke(points, pageNumber);
+    saveInkStroke(points, pageNumber, isHighlighter);
   }
 
   // 탭 지점 주변의 작은 사각형 — 삭제 팝업 앵커 계산에 popupAnchor가 rect를
@@ -1135,7 +1162,7 @@
   }
 
   // client 좌표 스트로크를 시작 페이지 기준 PDF 좌표로 변환해 저장한다.
-  function saveInkStroke(points, pageNumber) {
+  function saveInkStroke(points, pageNumber, isHighlighter = false) {
     const pageView = pageViews()[pageNumber - 1];
     if (!pageView?.div || !pageView.viewport || !itemKey) return;
 
@@ -1153,8 +1180,8 @@
     const item = {
       pageIndex,
       paths: [flat],
-      width: penWidth,
-      color: INK_COLOR,
+      width: isHighlighter ? highlighterWidth : penWidth,
+      color: isHighlighter ? HIGHLIGHTER_INK_COLOR : INK_COLOR,
       pageLabel: pageLabels?.[pageIndex] || String(pageIndex + 1),
       sortIndex: formatSortIndex(pageIndex, 0, viewBox[3] - strokeMaxY(flat)),
     };
@@ -1605,6 +1632,7 @@
   class="pdfViewer"
   class:pen-mode={penMode}
   class:eraser-mode={eraserMode}
+  class:highlighter-mode={highlighterPenMode}
   bind:this={viewerEl}
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
 ></div>
@@ -1618,10 +1646,12 @@
     <polyline
       points={drawPreviewPoints.map((p) => `${p.x},${p.y}`).join(' ')}
       fill="none"
-      stroke={INK_COLOR}
+      stroke={drawIsHighlighter ? HIGHLIGHTER_INK_COLOR : INK_COLOR}
       stroke-width={drawStrokeWidthPx}
-      stroke-linecap="round"
+      stroke-linecap={drawIsHighlighter ? 'butt' : 'round'}
       stroke-linejoin="round"
+      style:opacity={drawIsHighlighter ? 0.4 : 1}
+      style:mix-blend-mode={drawIsHighlighter ? 'multiply' : 'normal'}
     />
   </svg>
 {/if}
@@ -1792,7 +1822,8 @@
 
   /* 펜 모드에서는 텍스트 선택을 막고 커서를 십자로 바꿔 "그리는 상태"임을
      드러낸다. */
-  .pdfViewer.pen-mode {
+  .pdfViewer.pen-mode,
+  .pdfViewer.highlighter-mode {
     cursor: crosshair;
   }
 
@@ -1802,7 +1833,8 @@
   }
 
   :global(.pdfViewer.pen-mode .textLayer),
-  :global(.pdfViewer.eraser-mode .textLayer) {
+  :global(.pdfViewer.eraser-mode .textLayer),
+  :global(.pdfViewer.highlighter-mode .textLayer) {
     user-select: none;
   }
 
