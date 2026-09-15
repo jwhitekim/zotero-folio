@@ -44,10 +44,8 @@
   // .html-viewer-scroll 스크롤바와 동시에 뜨는 이중 스크롤 원인이 됐다.
   function unblockOverflow(doc) {
     const style = doc.createElement('style');
-    // touch-action: none — iframe 안 문서의 네이티브 팬/핀치를 전부 끈다.
-    // 팬·핀치는 iframeTouch가 바깥 scrollEl 기준으로 직접 처리한다.
     style.textContent =
-      'html, body { overflow-x: auto !important; overflow-y: hidden !important; touch-action: none !important; }';
+      'html, body { overflow-x: auto !important; overflow-y: hidden !important; }';
     doc.head?.appendChild(style);
   }
 
@@ -72,43 +70,27 @@
     return availableWidth / contentWidth;
   }
 
-  // 바깥 스크롤 박스(iframe 밖 패딩 영역) 위에서의 터치 제스처. 팬은 이
-  // 스크롤 박스를 직접 스크롤하고, clientY가 이미 바깥 문서 기준이라 보정이
-  // 필요 없다.
+  // 스크롤 박스(.html-viewer-scroll) 위에서의 터치 제스처. 팬은 이 스크롤
+  // 박스를 직접 스크롤하고, clientY가 이미 이 문서 기준이라 보정이 필요 없다.
+  //
+  // iframe에는 pointer-events: none을 걸어(아래 <style>) 콘텐츠 위 터치·휠이
+  // 전부 이 스크롤 박스로 떨어지게 한다 — 예전엔 iframe contentWindow에 별도
+  // 리스너(iframeTouch)를 달아 콘텐츠 위 터치를 처리했지만, iOS Safari는
+  // 별도 브라우징 컨텍스트(iframe) 안에서 발생한 포인터/터치 이벤트를 부모가
+  // 등록한 리스너에 확실히 전달하지 않아(w3c/pointerevents#325, WebKit의
+  // iframe touch-action 처리 미정의) 콘텐츠 위에서 스크롤이 전혀 안 되는
+  // 버그가 있었다. PDF 쪽(PdfPane)이 같은 문서 안 div에 제스처를 붙여
+  // 정상 동작하는 것과 같은 구조로 맞춘다. 트레이드오프: iframe 콘텐츠
+  // 위에서의 텍스트 드래그 선택/링크 클릭이 막힌다(스냅샷 열람 전용이라 수용).
   const outerTouch = createTouchGestures({
     getZoom: () => zoom,
     zoomTo: onZoomTo,
     getScrollEl: () => scrollEl,
   });
 
-  // iframe 안(콘텐츠 위)에서의 터치 제스처. iframe은 별도 문서/윈도우라
-  // 포인터 이벤트가 바깥 스크롤 박스까지 올라오지 않으므로(onIframeWheel과
-  // 같은 이유) 그 안쪽 window에 직접 단다. 팬은 바깥 스크롤 박스(scrollEl)를
-  // 스크롤하고(iframe 자체는 콘텐츠 높이만큼 커져서 내부 스크롤이 없음),
-  // 핀치 중심 Y는 iframe 기준이라 iframe의 화면상 top을 더해 보정한다.
-  // 텍스트 선택 판정은 iframe 문서의 선택을 봐야 하므로 그 window의
-  // getSelection을 넘긴다.
-  const iframeTouch = createTouchGestures({
-    getZoom: () => zoom,
-    zoomTo: onZoomTo,
-    getScrollEl: () => scrollEl,
-    getSelection: () => iframeEl?.contentWindow?.getSelection() ?? null,
-    clientYOffset: () => iframeEl?.getBoundingClientRect().top ?? 0,
-  });
-
   function attachIframeZoom() {
     const doc = iframeEl?.contentDocument;
     if (doc) unblockOverflow(doc);
-    iframeEl?.contentWindow?.addEventListener('wheel', onIframeWheel, { passive: false });
-    const win = iframeEl?.contentWindow;
-    if (win) {
-      // pointermove는 팬/핀치 중 preventDefault로 네이티브 동작을 막아야 하므로
-      // passive: false로 단다.
-      win.addEventListener('pointerdown', iframeTouch.down);
-      win.addEventListener('pointermove', iframeTouch.move, { passive: false });
-      win.addEventListener('pointerup', iframeTouch.up);
-      win.addEventListener('pointercancel', iframeTouch.cancel);
-    }
     // 폭 맞춤 계산은 아래 $effect가 담당한다 — loaded를 여기서 true로만
     // 바꾼다. iframe onload 시점에 scrollEl(자기 자신의 스크롤 박스)이
     // 아직 bind:this로 안 잡혀 있을 수 있어서, 여기서 바로 재는 대신
@@ -116,24 +98,13 @@
     loaded = true;
   }
 
-  // 바깥 스크롤 박스 위(iframe 밖 패딩 영역)에서 Ctrl+휠.
+  // 스크롤 박스 위에서 Ctrl+휠 확대/축소. iframe은 pointer-events: none이라
+  // 콘텐츠 위 휠도 전부 이 핸들러로 올라온다(별도 iframe 휠 리스너 불필요).
   function onWheel(e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const step = zoomStep(e.deltaY);
     onZoomTo(zoom + (e.deltaY < 0 ? step : -step), e.clientY);
-  }
-
-  // iframe은 별도 문서/윈도우라 커서가 그 안에 있으면 바깥 스크롤 박스의
-  // onwheel이 아예 안 불린다 — 브라우저 화면 전체가 확대/축소돼 버리는
-  // 이유. iframe이 로드되면 그 안쪽 window에 직접 리스너를 달아서 onZoomTo로
-  // 넘긴다(clientY는 iframe 기준이라 바깥 좌표로 보정).
-  function onIframeWheel(e) {
-    if (!(e.ctrlKey || e.metaKey)) return;
-    e.preventDefault();
-    const rect = iframeEl.getBoundingClientRect();
-    const step = zoomStep(e.deltaY);
-    onZoomTo(zoom + (e.deltaY < 0 ? step : -step), rect.top + e.clientY);
   }
 
   // loaded와 scrollEl 둘 다 준비돼야 정확히 잴 수 있는데, 어느 쪽이 먼저
@@ -267,7 +238,11 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     background: #fff;
-    /* iframe 자체에서도 네이티브 팬/핀치를 전부 끈다(iframeTouch가 처리). */
-    touch-action: none;
+    /* iframe은 입력에 대해 투명하게 둔다 — 콘텐츠 위 터치·휠이 전부 부모
+       .html-viewer-scroll로 떨어져 그쪽 제스처 핸들러(outerTouch)/onWheel이
+       처리한다. iframe(별도 브라우징 컨텍스트) 안에서 발생한 터치를 부모가
+       못 받는 iOS Safari 문제를 근본적으로 피한다. 대가로 스냅샷 콘텐츠 위
+       텍스트 선택/링크 클릭은 막힌다(열람 전용). */
+    pointer-events: none;
   }
 </style>
