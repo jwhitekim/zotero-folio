@@ -51,7 +51,7 @@
     penWidth = 2,
     eraserMode = false,
     // highlighterPenMode: 프리핸드 형광펜 모드. 펜과 같은 그리기 경로를 쓰되
-    // 드래그를 수평 막대로 스냅하고 형광펜색(반투명)으로 저장/렌더한다.
+    // 드래그를 직선(시작점~현재점, 방향 무관)으로 스냅하고 형광펜색(반투명)으로 저장/렌더한다.
     highlighterPenMode = false,
     highlighterWidth = 12,
   } = $props();
@@ -1064,7 +1064,7 @@
   let drawPoints = []; // 그리는 중인 스트로크의 client 좌표 [{x,y}, ...]
   let drawPreviewPoints = $state([]); // 미리보기 렌더용 스냅샷(rAF로 갱신)
   let drawStrokeWidthPx = $state(2); // 미리보기 선 굵기(화면 px)
-  // 이번 스트로크가 형광펜인지. 형광펜이면 드래그를 수평 막대로 스냅하고
+  // 이번 스트로크가 형광펜인지. 형광펜이면 드래그를 직선으로 스냅하고
   // 미리보기/저장 색을 형광펜색으로 바꾼다(반투명 렌더는 미리보기 SVG가 처리).
   let drawIsHighlighter = $state(false);
   let drawPageNumber = 0;
@@ -1118,11 +1118,11 @@
   function onDrawPointerMove(e) {
     if (!drawing || e.pointerId !== drawPointerId) return;
     if (drawIsHighlighter) {
-      // 형광펜은 시작점 y에 고정한 수평 막대로 스냅한다 — 삐뚤게 그어도 항상
-      // [시작점, {끝x, 시작y}] 두 점만 유지해 곧은 막대로 보이고 저장된다.
+      // 형광펜은 시작점~현재점을 잇는 직선으로 스냅한다(방향 무관) — 삐뚤게
+      // 그어도 항상 [시작점, 현재점] 두 점만 유지해 곧은 막대로 보이고 저장된다.
       const start = drawPoints[0];
-      if (Math.abs(e.clientX - start.x) > 1.5) drawMoved = true;
-      drawPoints = [start, { x: e.clientX, y: start.y }];
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 1.5) drawMoved = true;
+      drawPoints = [start, { x: e.clientX, y: e.clientY }];
     } else {
       const last = drawPoints[drawPoints.length - 1];
       if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) > 1.5) drawMoved = true;

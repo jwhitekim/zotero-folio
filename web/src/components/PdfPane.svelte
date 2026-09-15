@@ -28,7 +28,7 @@
   // 지우개 모드. 펜/형광펜과 상호 배타(라디오 버튼처럼 하나 켜면 나머지는 꺼짐).
   let eraserMode = $state(false);
   // 프리핸드 형광펜 모드. 펜/지우개와 상호 배타인 3번째 그리기 도구.
-  // 드래그를 수평 막대로 스냅해 형광펜색(반투명)으로 그린다.
+  // 드래그를 직선(방향 무관)으로 스냅해 형광펜색(반투명)으로 그린다.
   let highlighterPenMode = $state(false);
   let highlighterWidth = $state(12); // 기본 "보통"
 
@@ -191,7 +191,7 @@
         >
           <Icon name="pen" size={16} />
         </button>
-        <!-- 형광펜(프리핸드) 토글. 켜면 드래그가 수평 막대로 스냅돼 반투명
+        <!-- 형광펜(프리핸드) 토글. 켜면 드래그가 직선으로 스냅돼 반투명
              형광펜으로 그려진다. 켜져 있을 때만 형광펜 전용 굵기 선택을 펼친다. -->
         {#if highlighterPenMode}
           <div class="pen-width-controls" role="radiogroup" aria-label="형광펜 굵기">
