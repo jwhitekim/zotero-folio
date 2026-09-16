@@ -93,7 +93,8 @@
 
   <main
     class:reading-mode={Boolean(detailKey) && !showLoginRoute && !showGuideRoute}
-    class:login-mode={showGuideRoute || !authConnected || showLoginRoute}
+    class:login-mode={!showGuideRoute && (!authConnected || showLoginRoute)}
+    class:guide-mode={showGuideRoute}
   >
     {#if showGuideRoute}
       <GuidePage />

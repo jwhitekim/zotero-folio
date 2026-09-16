@@ -111,13 +111,33 @@ main.reading-mode {
 
 main.login-mode {
   width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+  margin-left: calc(50% - 50vw);
+  padding: 0;
+}
+
+@media (max-width: 680px) {
+  /* 좁은 화면에서는 LoginPage.svelte의 .folio-cover가 세로로 쌓이며
+     100dvh를 넘길 수 있어(overflow: visible) 이 래퍼도 함께 스크롤을 허용
+     해야 내용이 잘리지 않는다. */
+  main.login-mode {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+}
+
+main.guide-mode {
+  width: 100vw;
   min-height: 100dvh;
   margin-left: calc(50% - 50vw);
   padding: 0;
-  background: var(--surface-subtle);
+  overflow-y: auto;
+  background: var(--surface);
 }
 
-main:not(.reading-mode):not(.login-mode) {
+main:not(.reading-mode):not(.login-mode):not(.guide-mode) {
   height: calc(100dvh - 88px - env(safe-area-inset-bottom));
   min-height: 0;
   overflow-y: auto;
@@ -477,6 +497,19 @@ main:not(.reading-mode):not(.login-mode) {
   font-size: 0.58rem;
   line-height: 1.6;
   text-align: center;
+}
+
+.login-guide-link {
+  display: block;
+  margin-top: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.login-guide-link:hover {
+  color: var(--accent);
 }
 
 .login-error {
@@ -2027,7 +2060,7 @@ a.reader-title svg {
   }
 
   /* 하단 캡슐 자리를 비워두던 여백 대신, 상단 고정 탭바 높이만큼 자리를 만든다. */
-  main:not(.reading-mode):not(.login-mode) {
+  main:not(.reading-mode):not(.login-mode):not(.guide-mode) {
     height: calc(100dvh - 58px);
     margin-top: 58px;
   }
@@ -2237,6 +2270,33 @@ a.reader-title svg {
 .login-features > div > span {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: color-mix(in srgb, var(--accent) 48%, white);
+}
+
+/* 로그인은 장식용 3D 오브젝트 대신 실제 연구 흔적이 느껴지는 이미지 한 장으로
+   브랜드의 사용 맥락을 보여준다. 카피와 CTA의 대비를 유지하기 위해 이미지에는
+   어두운 그라데이션 마스크를 적용한다. */
+.login-research-image {
+  position: absolute;
+  z-index: 0;
+  right: 0;
+  bottom: 0;
+  width: 39%;
+  height: 67%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.78;
+  mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.72) 28%, #000 70%);
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.72) 28%, #000 70%);
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .login-research-image {
+    width: 48%;
+    height: 58%;
+    opacity: 0.34;
+  }
 }
 
 .library-sidebar {
