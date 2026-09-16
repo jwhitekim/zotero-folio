@@ -7,6 +7,7 @@
   import PaperDetailSplit from './pages/PaperDetailSplit.svelte';
   import Collections from './pages/Collections.svelte';
   import LoginPage from './pages/LoginPage.svelte';
+  import GuidePage from './pages/GuidePage.svelte';
   import { api } from './services/api.js';
 
   let tab = $state('home'); // 'home' | 'papers' | 'collections' | 'search'
@@ -22,6 +23,7 @@
   let authError = $state('');
   let currentPath = $state(window.location.pathname);
   let showLoginRoute = $derived(currentPath === '/login');
+  let showGuideRoute = $derived(currentPath === '/guide');
 
   async function checkAuth() {
     authChecked = false;
@@ -30,7 +32,7 @@
       const status = await api.authStatus();
       authConnected = status.connected;
       authUsername = status.username || '';
-      if (!status.connected && currentPath !== '/login') {
+      if (!status.connected && currentPath !== '/login' && currentPath !== '/guide') {
         history.replaceState({}, '', '/login');
         currentPath = '/login';
       }
@@ -81,19 +83,21 @@
 
 <div
   class="app-frame"
-  class:library-frame={authConnected && !detailKey && !showLoginRoute}
-  class:reader-frame={Boolean(detailKey) && !showLoginRoute}
-  class:login-frame={!authConnected || showLoginRoute}
+  class:library-frame={authConnected && !detailKey && !showLoginRoute && !showGuideRoute}
+  class:reader-frame={Boolean(detailKey) && !showLoginRoute && !showGuideRoute}
+  class:login-frame={showGuideRoute || !authConnected || showLoginRoute}
 >
-  {#if authConnected && !detailKey && !showLoginRoute}
+  {#if authConnected && !detailKey && !showLoginRoute && !showGuideRoute}
     <TabBar {tab} username={authUsername} onSelectTab={selectTab} onSearch={openSearch} />
   {/if}
 
   <main
-    class:reading-mode={Boolean(detailKey) && !showLoginRoute}
-    class:login-mode={!authConnected || showLoginRoute}
+    class:reading-mode={Boolean(detailKey) && !showLoginRoute && !showGuideRoute}
+    class:login-mode={showGuideRoute || !authConnected || showLoginRoute}
   >
-    {#if !authChecked}
+    {#if showGuideRoute}
+      <GuidePage />
+    {:else if !authChecked}
       <div class="auth-loading" aria-label="로그인 상태 확인 중">
         <span class="folio-loading-mark">F</span>
         <strong>Folio</strong>
