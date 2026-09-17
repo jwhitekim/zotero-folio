@@ -5,6 +5,5 @@ services:
       - "3002:3002"
     env_file:
       - .env
-    volumes:
-      - ./data:/app/data # SQLite DB를 컨테이너 밖에 영속화
+    # 캐시가 Supabase로 옮겨가면서 컨테이너 안에 영속화할 로컬 파일이 없어졌다.
     restart: unless-stopped

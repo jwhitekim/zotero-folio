@@ -8,19 +8,16 @@
 //       첨부파일 아이템 자체는 건드리지 않는다.
 
 import crypto from 'node:crypto';
-import { getZoteroAuth } from './db.js';
+import { requireUser } from './context.js';
 
 const BASE_URL = 'https://api.zotero.org';
 
-function requireAuth() {
-  const auth = getZoteroAuth();
-  if (!auth) throw new Error('Zotero 계정이 연결되지 않았습니다 — /oauth/login으로 로그인하세요');
-  return auth;
-}
-
+// 멀티유저이므로 "누구의 Zotero 라이브러리인지"는 요청 컨텍스트에서 읽는다
+// (server.js가 세션에서 유저를 찾아 컨텍스트에 심어둔다). 모듈 전역에 토큰을
+// 들고 있으면 동시 접속 시 다른 사람 라이브러리를 읽게 된다.
 function headers(extra = {}) {
   return {
-    'Zotero-API-Key': requireAuth().token,
+    'Zotero-API-Key': requireUser().zoteroApiKey,
     'Zotero-API-Version': '3',
     ...extra,
   };
@@ -32,7 +29,7 @@ function writeToken() {
 }
 
 function userPrefix() {
-  return `${BASE_URL}/users/${requireAuth().userId}`;
+  return `${BASE_URL}/users/${requireUser().zoteroUserId}`;
 }
 
 // 마지막 동기화 버전 이후 바뀐 최상위 아이템을 전부 가져온다 (페이지네이션 처리).

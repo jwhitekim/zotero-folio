@@ -1,9 +1,17 @@
 // 서버 API fetch 래퍼 모음.
 
-async function request(path, opts) {
-  const res = await fetch(path, opts);
+// 멀티유저가 되면서 "누구인지"는 서버가 발급한 세션 쿠키(folio.sid)로만 판별한다.
+// 같은 출처로 보내는 fetch라 쿠키는 기본으로 실려 가지만, 의도를 분명히 하려고
+// credentials를 명시한다.
+async function request(path, opts = {}) {
+  const res = await fetch(path, { credentials: 'same-origin', ...opts });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // 세션이 만료됐거나(서버 재시작 등) 로그아웃된 상태 — 로그인 화면으로 돌린다.
+    // 로그인 여부 자체를 묻는 /api/auth/status는 예외 (App.svelte가 직접 처리).
+    if (res.status === 401 && !path.startsWith('/api/auth/')) {
+      window.location.assign('/login');
+    }
     throw new Error(body.error || `서버 오류 (${res.status})`);
   }
   return res.status === 204 ? null : res.json();

@@ -3,9 +3,15 @@
 // 아카이브 + 직접 정리하는 구조화 노트" 도구다. 노트 원문은 로컬에
 // 캐시하지 않고 항상 Zotero에서 라이브로 읽는다 (db.js는 papers
 // 메타데이터 캐시만 담당).
+//
+// 멀티유저: Zotero OAuth로 로그인하면 쿠키 세션이 발급되고, 요청마다 세션의
+// userId로 유저를 찾아 요청 컨텍스트(context.js)에 심는다. db.js/zotero.js는
+// 그 컨텍스트를 보고 "이 유저의" 데이터만 읽고 쓴다.
 
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import express from 'express';
+import session from 'express-session';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { marked } from 'marked';
@@ -19,10 +25,10 @@ import {
   getPaper,
   deletePaper,
   listPapersByCollection,
-  getZoteroAuth,
-  setZoteroAuth,
-  clearZoteroAuth,
+  upsertUserByZoteroId,
+  findUserById,
 } from './db.js';
+import { runWithUser, currentUser } from './context.js';
 import {
   fetchChangedTopItems,
   fetchChangedAttachmentParentKeys,
@@ -50,6 +56,40 @@ const WEB_DIST = path.join(process.cwd(), 'web', 'dist');
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 const CONSUMER_KEY = process.env.ZOTERO_CLIENT_KEY;
 const CONSUMER_SECRET = process.env.ZOTERO_CLIENT_SECRET;
+
+// --- 세션 (쿠키 기반) -----------------------------------------------------
+// 세션에는 folio_users.id만 담고, Zotero 토큰 같은 실제 값은 매 요청 Supabase에서
+// 읽는다 (로그아웃/토큰 갱신이 즉시 반영되도록).
+//
+// 저장소는 express-session 기본 MemoryStore를 쓴다 — 별도 세션 스토어 의존성을
+// 더하지 않기 위한 선택이다. 대신 서버를 재시작하면 세션이 사라져 다시
+// 로그인해야 한다 (Zotero 토큰은 Supabase에 남아 있으므로 재로그인은 클릭 두 번).
+const IS_HTTPS = APP_BASE_URL.startsWith('https://');
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  console.warn('[session] SESSION_SECRET이 없어 임시 키를 생성했습니다 — 재시작하면 로그인 세션이 풀립니다');
+}
+// 리버스 프록시(https 종단) 뒤에 있으면 X-Forwarded-Proto를 신뢰해야
+// "이 연결이 https인지"를 제대로 판단할 수 있다.
+if (IS_HTTPS) app.set('trust proxy', 1);
+
+app.use(
+  session({
+    name: 'folio.sid',
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax', // OAuth 콜백이 외부(zotero.org)에서 돌아오므로 strict는 못 쓴다
+      // 'auto' = 실제 연결이 https일 때만 secure. APP_BASE_URL이 https라고
+      // 무조건 secure를 켜면, 같은 빌드를 로컬 http://localhost로 띄웠을 때
+      // 브라우저가 쿠키를 버려서 로그인이 영영 완료되지 않는다.
+      secure: 'auto',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30일
+    },
+  })
+);
 
 const MEMO_TAG = 'zotero-insight:memo';
 
@@ -135,7 +175,7 @@ function noteHtmlToMarkdown(html) {
 // papers 캐시만 갱신한다 (AI 처리 없음). 실패한 아이템은 로그만 남기고
 // 계속 진행 — 전체 sync가 하나의 실패로 중단되면 안 된다.
 async function doSync() {
-  const lastVersion = getLastVersion();
+  const lastVersion = await getLastVersion();
   const { items, newVersion } = await fetchChangedTopItems(lastVersion);
 
   // 기존 아이템에 첨부파일만 새로 붙은 경우 부모 아이템 자체는 top-level
@@ -164,7 +204,7 @@ async function doSync() {
 
     try {
       const attachment = await findReadableAttachment(item.key);
-      savePaper({
+      await savePaper({
         itemKey: item.key,
         itemVersion: item.version,
         title: cleanTitle(item.data.title, item.data.itemType) || '(제목 없음)',
@@ -185,21 +225,21 @@ async function doSync() {
   try {
     const deletedKeys = await fetchDeletedItemKeys(lastVersion);
     for (const key of deletedKeys) {
-      deletePaper(key);
+      await deletePaper(key);
       removed++;
     }
   } catch (err) {
     console.error(`[sync] 삭제 항목 조회 실패: ${err.message}`);
   }
 
-  setLastVersion(newVersion);
+  await setLastVersion(newVersion);
   return { checked: items.length, cached, removed };
 }
 
 // --- Zotero OAuth 로그인 --------------------------------------------------
 // request token과 secret은 /oauth/login → /oauth/callback 사이에서만 잠깐
-// 필요하다. 1인용 도구라 세션 저장소 없이 메모리 변수 하나로 충분하다.
-let pendingOAuth = null; // { token, secret }
+// 필요하다. 멀티유저이므로 모듈 전역이 아니라 요청자의 세션에 담는다 — 전역에
+// 두면 두 사람이 동시에 로그인할 때 서로의 request token을 덮어쓴다.
 
 app.get('/oauth/login', async (req, res) => {
   try {
@@ -208,7 +248,7 @@ app.get('/oauth/login', async (req, res) => {
       consumerSecret: CONSUMER_SECRET,
       callbackUrl: `${APP_BASE_URL}/oauth/callback`,
     });
-    pendingOAuth = { token: oauthToken, secret: oauthTokenSecret };
+    req.session.pendingOAuth = { token: oauthToken, secret: oauthTokenSecret };
     res.redirect(buildAuthorizeUrl({ oauthToken, appName: 'Folio' }));
   } catch (err) {
     console.error('[oauth] request token 실패:', err.message);
@@ -218,7 +258,8 @@ app.get('/oauth/login', async (req, res) => {
 
 app.get('/oauth/callback', async (req, res) => {
   const { oauth_token: oauthToken, oauth_verifier: oauthVerifier } = req.query;
-  if (!pendingOAuth || pendingOAuth.token !== oauthToken) {
+  const pending = req.session.pendingOAuth;
+  if (!pending || pending.token !== oauthToken) {
     return res.status(400).send('OAuth 세션이 만료되었습니다. 다시 시도해주세요.');
   }
   try {
@@ -226,32 +267,67 @@ app.get('/oauth/callback', async (req, res) => {
       consumerKey: CONSUMER_KEY,
       consumerSecret: CONSUMER_SECRET,
       oauthToken,
-      oauthTokenSecret: pendingOAuth.secret,
+      oauthTokenSecret: pending.secret,
       oauthVerifier,
     });
     // 문서에 따라 oauth_token_secret을 Zotero-API-Key로 사용한다.
-    setZoteroAuth({ token: result.oauthTokenSecret, userId: result.userId, username: result.username });
-    pendingOAuth = null;
-    res.redirect('/');
+    // 같은 Zotero 계정으로 다시 로그인하면 기존 유저 행의 토큰만 갱신된다
+    // (papers 캐시는 그대로 유지).
+    const user = await upsertUserByZoteroId({
+      zoteroUserId: result.userId,
+      zoteroUsername: result.username,
+      zoteroApiKey: result.oauthTokenSecret,
+    });
+    // 세션 고정(session fixation) 방지 — 로그인 시점에 세션 ID를 새로 뽑는다.
+    // 여기서 세션이 통째로 비워지므로 pendingOAuth도 함께 사라진다.
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('[oauth] 세션 재발급 실패:', err.message);
+        return res.status(500).send('로그인 세션 생성 실패: ' + err.message);
+      }
+      req.session.userId = user.id;
+      req.session.save(() => res.redirect('/'));
+    });
   } catch (err) {
     console.error('[oauth] access token 교환 실패:', err.message);
     res.status(500).send('Zotero 로그인 완료 실패: ' + err.message);
   }
 });
 
+// 세션의 userId로 유저를 찾아 요청 컨텍스트에 심는다. 여기서는 막지 않고
+// (로그인 화면용 /api/auth/status도 지나가야 하므로) 컨텍스트만 채운다.
+app.use('/api', async (req, res, next) => {
+  if (!req.session.userId) return next();
+  try {
+    const user = await findUserById(req.session.userId);
+    if (!user) {
+      // 유저 행이 사라진 세션(예: Supabase에서 삭제) — 세션도 버린다.
+      return req.session.destroy(() => next());
+    }
+    runWithUser(user, next);
+  } catch (err) {
+    console.error('[auth] 유저 조회 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/auth/status', (req, res) => {
-  const auth = getZoteroAuth();
-  res.json({ connected: !!auth, username: auth?.username || null });
+  const user = currentUser();
+  res.json({ connected: !!user, username: user?.zoteroUsername || null });
 });
 
+// 로그아웃은 세션만 끊는다 — Supabase에 저장된 Zotero 토큰과 papers 캐시는
+// 남겨둬서 다시 로그인하면 동기화 없이 바로 라이브러리가 보인다.
 app.post('/api/auth/logout', (req, res) => {
-  clearZoteroAuth();
-  res.json({ connected: false });
+  req.session.destroy(() => {
+    res.clearCookie('folio.sid');
+    res.json({ connected: false });
+  });
 });
 
-// Zotero 계정이 연결되지 않았으면 나머지 /api 라우트는 전부 막는다.
+// 로그인하지 않았으면 나머지 /api 라우트는 전부 막는다.
 app.use('/api', (req, res, next) => {
-  if (!getZoteroAuth()) {
+  if (!currentUser()) {
     return res.status(401).json({ error: 'Zotero 계정이 연결되지 않았습니다', loginUrl: '/oauth/login' });
   }
   next();
@@ -269,15 +345,20 @@ app.post('/api/sync', async (req, res) => {
 
 // --- papers ------------------------------------------------------------
 
-app.get('/api/papers', (req, res) => {
-  res.json(listPapers(req.query.q));
+app.get('/api/papers', async (req, res) => {
+  try {
+    res.json(await listPapers(req.query.q));
+  } catch (err) {
+    console.error('[papers list] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/papers/:key', async (req, res) => {
-  const paper = getPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
-
   try {
+    const paper = await getPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
+
     const memoNote = await findChildNoteByTag(req.params.key, MEMO_TAG);
     res.json({
       ...paper,
@@ -307,7 +388,7 @@ app.post('/api/papers/webpage', async (req, res) => {
   try {
     const pageTitle = await fetchPageTitle(url);
     const created = await createWebpageItem({ url, title: pageTitle });
-    savePaper({
+    await savePaper({
       itemKey: created.key,
       itemVersion: created.version,
       title: cleanTitle(created.data.title, created.data.itemType) || '(제목 없음)',
@@ -317,7 +398,7 @@ app.post('/api/papers/webpage', async (req, res) => {
       attachmentType: null,
       collections: created.data.collections || [],
     });
-    res.status(201).json(getPaper(created.key));
+    res.status(201).json(await getPaper(created.key));
   } catch (err) {
     console.error('[papers webpage] 생성 실패:', err.message);
     res.status(500).json({ error: err.message });
@@ -327,12 +408,12 @@ app.post('/api/papers/webpage', async (req, res) => {
 // 논문(Zotero 원본 아이템) 자체를 삭제한다. Zotero 휴지통으로 이동하며,
 // 자식 노트/첨부파일도 함께 딸려간다. 로컬 papers 캐시에서도 지운다.
 app.delete('/api/papers/:key', async (req, res) => {
-  if (!getPaper(req.params.key)) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
-
   try {
+    if (!(await getPaper(req.params.key))) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
+
     const item = await fetchItem(req.params.key);
     await deleteItem(req.params.key, item.version);
-    deletePaper(req.params.key);
+    await deletePaper(req.params.key);
     res.status(204).end();
   } catch (err) {
     console.error('[papers delete] 실패:', err.message);
@@ -367,11 +448,11 @@ app.put('/api/papers/:key/memo', async (req, res) => {
 });
 
 app.get('/api/papers/:key/pdf', async (req, res) => {
-  const paper = getPaper(req.params.key);
-  if (!paper?.attachmentKey || paper.attachmentType !== 'pdf') {
-    return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-  }
   try {
+    const paper = await getPaper(req.params.key);
+    if (!paper?.attachmentKey || paper.attachmentType !== 'pdf') {
+      return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+    }
     const buffer = await downloadAttachmentFile(paper.attachmentKey);
     res.set('Content-Type', 'application/pdf');
     res.send(buffer);
@@ -384,11 +465,11 @@ app.get('/api/papers/:key/pdf', async (req, res) => {
 // PDF가 없고 브라우저 커넥터가 저장한 HTML 스냅샷만 있는 아이템(예: 이 글이
 // 아니라 그냥 웹페이지) 원문 패널용 — 그대로 서빙해서 iframe에 띄운다.
 app.get('/api/papers/:key/html', async (req, res) => {
-  const paper = getPaper(req.params.key);
-  if (!paper?.attachmentKey || paper.attachmentType !== 'html') {
-    return res.status(404).json({ error: 'HTML 스냅샷이 없습니다' });
-  }
   try {
+    const paper = await getPaper(req.params.key);
+    if (!paper?.attachmentKey || paper.attachmentType !== 'html') {
+      return res.status(404).json({ error: 'HTML 스냅샷이 없습니다' });
+    }
     const buffer = await downloadAttachmentFile(paper.attachmentKey);
     // Zotero는 브라우저 커넥터로 저장한 스냅샷을 zip으로 묶어서 저장한다
     // (linkMode: imported_url) — PK로 시작하면 zip이니 그 안의 html을 꺼낸다.
@@ -443,16 +524,16 @@ function isValidRect(rect) {
 }
 
 // 하이라이트 API는 전부 "이 논문에 PDF 첨부가 있는가"부터 확인한다.
-function getPdfPaper(itemKey) {
-  const paper = getPaper(itemKey);
+async function getPdfPaper(itemKey) {
+  const paper = await getPaper(itemKey);
   return paper?.attachmentKey && paper.attachmentType === 'pdf' ? paper : null;
 }
 
 app.get('/api/papers/:key/highlights', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const annotations = await fetchAttachmentAnnotations(paper.attachmentKey);
     // 이번 범위는 텍스트 하이라이트뿐이라 다른 annotation 타입(메모/이미지/밑줄)은
     // 화면에 그리지 않고 건너뛴다 — 그려줄 방법이 없는 걸 억지로 사각형으로
@@ -470,9 +551,6 @@ app.get('/api/papers/:key/highlights', async (req, res) => {
 });
 
 app.post('/api/papers/:key/highlights', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   const { pageIndex, rects, text, color, pageLabel, sortIndex } = req.body || {};
   if (!Number.isInteger(pageIndex) || pageIndex < 0) {
     return res.status(400).json({ error: 'pageIndex(0 이상 정수)가 필요합니다' });
@@ -488,6 +566,9 @@ app.post('/api/papers/:key/highlights', async (req, res) => {
   }
 
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const created = await createHighlightAnnotation(paper.attachmentKey, {
       text: typeof text === 'string' ? text.slice(0, 5000) : '',
       color,
@@ -503,10 +584,10 @@ app.post('/api/papers/:key/highlights', async (req, res) => {
 });
 
 app.delete('/api/papers/:key/highlights/:annotationKey', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const item = await fetchItem(req.params.annotationKey);
     // 지우기 전에 "정말 이 논문 PDF에 달린 하이라이트 annotation인지"를 확인한다.
     // 이 경로로 원본 서지 아이템이나 첨부파일 자체가 삭제되는 일은 없어야 한다.
@@ -561,10 +642,10 @@ function isValidPath(path) {
 }
 
 app.get('/api/papers/:key/ink', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const annotations = await fetchAttachmentAnnotations(paper.attachmentKey);
     res.json(
       annotations
@@ -579,9 +660,6 @@ app.get('/api/papers/:key/ink', async (req, res) => {
 });
 
 app.post('/api/papers/:key/ink', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   const { pageIndex, paths, width, color, pageLabel, sortIndex } = req.body || {};
   if (!Number.isInteger(pageIndex) || pageIndex < 0) {
     return res.status(400).json({ error: 'pageIndex(0 이상 정수)가 필요합니다' });
@@ -603,6 +681,9 @@ app.post('/api/papers/:key/ink', async (req, res) => {
   }
 
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const created = await createInkAnnotation(paper.attachmentKey, {
       color,
       pageLabel: String(pageLabel || pageIndex + 1).slice(0, 50),
@@ -617,10 +698,10 @@ app.post('/api/papers/:key/ink', async (req, res) => {
 });
 
 app.delete('/api/papers/:key/ink/:annotationKey', async (req, res) => {
-  const paper = getPdfPaper(req.params.key);
-  if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
-
   try {
+    const paper = await getPdfPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: 'PDF 첨부파일이 없습니다' });
+
     const item = await fetchItem(req.params.annotationKey);
     // 지우기 전에 "정말 이 논문 PDF에 달린 필기 annotation인지"를 확인한다.
     if (
@@ -650,8 +731,13 @@ app.get('/api/collections', async (req, res) => {
   }
 });
 
-app.get('/api/collections/:key/papers', (req, res) => {
-  res.json(listPapersByCollection(req.params.key));
+app.get('/api/collections/:key/papers', async (req, res) => {
+  try {
+    res.json(await listPapersByCollection(req.params.key));
+  } catch (err) {
+    console.error('[collection papers] 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // web/(Svelte 빌드 결과) 정적 서빙 — `npm run build`를 web/에서 먼저 실행해야 함

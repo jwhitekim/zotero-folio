@@ -8,9 +8,10 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-# ---- 2. 서버 의존성 설치 (better-sqlite3 네이티브 빌드용 도구 포함) ----
+# ---- 2. 서버 의존성 설치 ----
+# 로컬 SQLite(better-sqlite3)를 Supabase로 걷어내면서 네이티브 빌드 도구가
+# 더 이상 필요 없어졌다 — 순수 JS 의존성만 남는다.
 FROM node:20-alpine AS deps
-RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
