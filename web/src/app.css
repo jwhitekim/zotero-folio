@@ -3124,3 +3124,199 @@ a.reader-title svg {
     background: linear-gradient(#6f5039, #4c3426);
   }
 }
+
+/* Wide desktop adaptation
+   1440px 이상에서는 노트북 기준의 이중 max-width 제한을 풀고 가용 화면을
+   사용한다. 콘텐츠 행은 같은 폭을 공유하며 QHD에서도 과도한 빈 여백이 없다. */
+@media (min-width: 1440px) {
+  #app {
+    max-width: none;
+  }
+
+  .library-frame {
+    grid-template-columns: clamp(246px, 11.5vw, 304px) minmax(0, 1fr);
+  }
+
+  .library-frame > main:not(.reading-mode):not(.login-mode):not(.guide-mode) {
+    padding:
+      clamp(2.5rem, 3.2vh, 4rem)
+      clamp(3rem, 4.5vw, 7rem)
+      clamp(3rem, 5vh, 5rem);
+  }
+
+  .library-frame > main > :is(header, div, p):not(.library-hero),
+  .library-frame > main > .library-hero,
+  .library-frame > main > .book-shelf,
+  .library-frame > main > .home-collection-grid,
+  .library-frame > main > .collection-grid,
+  .library-frame > main > .paper-list,
+  .library-frame > main > form {
+    width: 100%;
+    max-width: none;
+  }
+
+  .library-hero {
+    min-height: clamp(320px, 31vh, 440px);
+    padding: clamp(2.75rem, 3.4vw, 5rem);
+    grid-template-columns: minmax(0, 1.35fr) minmax(420px, .65fr);
+  }
+
+  .library-hero h1 {
+    font-size: clamp(3rem, 3.3vw, 4.8rem);
+  }
+
+  .hero-book-stack {
+    min-height: 280px;
+  }
+
+  .hero-book {
+    width: clamp(150px, 7.5vw, 190px);
+    height: clamp(215px, 12vw, 270px);
+  }
+
+  .home-stats {
+    margin-top: 1.5rem;
+    gap: clamp(.75rem, 1vw, 1.5rem);
+  }
+
+  .stat-card {
+    min-height: 96px;
+    padding: 1.15rem 1.4rem;
+  }
+
+  .book-shelf {
+    padding-inline: clamp(1rem, 1.5vw, 2rem);
+    gap: clamp(1.25rem, 2vw, 2.75rem);
+  }
+
+  .home-collection-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: clamp(.65rem, 1vw, 1.25rem);
+  }
+}
+
+@media (min-width: 2100px) {
+  .library-frame > main:not(.reading-mode):not(.login-mode):not(.guide-mode) {
+    padding-inline: clamp(5rem, 5vw, 8rem);
+  }
+
+  .library-hero {
+    grid-template-columns: minmax(0, 1.45fr) minmax(500px, .55fr);
+  }
+
+  .home-collection-card {
+    min-height: 92px;
+    padding: 1rem 1.2rem;
+  }
+}
+
+/* Guide motion — unsupported browsers keep the static layout unchanged. */
+.guide-mode .guide-nav {
+  animation: guide-nav-in 520ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.guide-mode .intro > div:first-child {
+  animation: guide-intro-in 760ms 80ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.guide-mode .intro-card {
+  animation: guide-card-in 760ms 180ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.guide-mode .steps figure img {
+  transform: scale(1);
+  transition: transform 650ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.guide-mode .steps figure a:hover img,
+.guide-mode .steps figure a:focus-visible img {
+  transform: scale(1.018);
+}
+
+.guide-mode .step-number {
+  transition: color 240ms ease, transform 320ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.guide-mode .steps > li:hover .step-number {
+  color: var(--accent-strong);
+  transform: translateY(-4px);
+}
+
+@keyframes guide-nav-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes guide-intro-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes guide-card-in {
+  from { opacity: 0; transform: translateY(20px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-mode .guide-nav,
+  .guide-mode .intro > div:first-child,
+  .guide-mode .intro-card,
+  .guide-mode .steps > li,
+  .guide-mode .finish {
+    animation: none !important;
+  }
+
+  .guide-mode .steps figure img,
+  .guide-mode .step-number {
+    transition: none !important;
+  }
+
+  .guide-mode .steps figure a:hover img,
+  .guide-mode .steps figure a:focus-visible img,
+  .guide-mode .steps > li:hover .step-number {
+    transform: none;
+  }
+}
+
+/* Scroll reveal — 레퍼런스: docs/guide-scroll-reveal-research.md.
+   "숨김 기본 상태 + transition"을 기본 규칙에 걸고, .is-visible은 최종값만
+   덮어쓴다. transition을 상태별 클래스에 나눠 걸면 클래스가 바뀌는 순간
+   목표 스타일에 transition이 없어 즉시 점프하는 버그가 난다(실제 겪음) —
+   그래서 transition은 반드시 두 상태 모두에 걸리는 이 기본 규칙에 둔다.
+   `.motion-ready`는 JS(onMount)가 관찰을 시작하기 전까지 숨김 상태로
+   플래시되는 것을 막는 게이트 — JS가 실패해도 콘텐츠가 영영 안 보이는
+   사고를 막기 위해 기본은 보임(opacity:1)이고, 게이트가 열려야만 숨김
+   애니메이션이 활성화된다. */
+.guide-mode .steps > li,
+.guide-mode .finish {
+  opacity: 1;
+  transform: none;
+}
+
+.guide-mode .setup-guide.motion-ready .steps > li,
+.guide-mode .setup-guide.motion-ready .finish {
+  opacity: 0;
+  transform: translateY(40px);
+  transition:
+    opacity 620ms cubic-bezier(.22, 1, .36, 1),
+    transform 720ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.guide-mode .setup-guide.motion-ready .steps > li.is-visible,
+.guide-mode .setup-guide.motion-ready .finish.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* 안내 문서 등장은 접근성 전역 리셋(맨 위 :root, transition-duration:
+   0.01ms !important)에서 의도적으로 제외한다 — 단계별로 서서히 드러나는
+   흐름 자체가 안내 문서의 콘텐츠이므로, "느린 애니메이션"이 아니라
+   "다음 정보가 있다"는 신호로 본다. */
+@media (prefers-reduced-motion: reduce) {
+  .guide-mode .setup-guide.motion-ready .steps > li,
+  .guide-mode .setup-guide.motion-ready .finish {
+    transition:
+      opacity 620ms cubic-bezier(.22, 1, .36, 1),
+      transform 720ms cubic-bezier(.22, 1, .36, 1) !important;
+  }
+}
