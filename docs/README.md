@@ -30,6 +30,7 @@ CLAUDE.md에 다 담기엔 긴 내용을 옮겨둔 곳입니다.
 | --- | --- |
 | [touch/tablet-touch-ux-ideas.md](touch/tablet-touch-ux-ideas.md) | 태블릿/모바일 터치 UX 논의(핀치 확대, 필기, 그 밖 디자인 방향) |
 | [touch/pdf-touch-pinch-zoom.md](touch/pdf-touch-pinch-zoom.md) | 터치 핀치 확대/축소의 `touch-action` 충돌 원인 조사 |
+| [touch/mobile-scroll-zoom-reference.md](touch/mobile-scroll-zoom-reference.md) | 모바일 사파리 관성 스크롤·핀치 줌 레퍼런스 — 기존 감쇠 계수의 iOS 근거 확인, 러버밴드 오버스크롤 후보, `visualViewport` 방식을 채택하지 않은 이유 |
 
 ## 디자인·애니메이션 ([design/](design/))
 
