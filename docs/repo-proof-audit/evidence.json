@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "repository": "jwhitekim/zotero-folio",
+  "revision": "c39928784c902fe2567ee83a766ae34d4db52c7a",
+  "mode": "AUDIT",
+  "runtime_verification": {"status": "NONE", "reason": "The repository is untrusted and requires npm dependencies, credentials, Supabase and Zotero. Static analysis provided sufficient evidence for code-path findings; no target code was executed."},
+  "findings": [
+    {
+      "id": "RP-NODE-001",
+      "title": "Incremental sync advances past items that failed to cache",
+      "category": "transaction_concurrency",
+      "area": {"path": "server/", "profile": "backend-general"},
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "verification_level": "CODE_PROVEN",
+      "problem": "The sync loop catches and suppresses individual fetch/save failures, but still persists the batch's newVersion checkpoint. A failed item whose Zotero version does not change again is therefore outside subsequent since=newVersion queries and can remain permanently absent or stale.",
+      "evidence": [
+        {"id": "E-NODE-001-A", "kind": "CODE", "location": "server/server.js:177-220", "observation": "doSync reads one lastVersion, obtains newVersion, and converts each changed item; per-item failures are logged and execution continues."},
+        {"id": "E-NODE-001-B", "kind": "CODE", "location": "server/server.js:223-235", "observation": "Deleted-item failures are also suppressed and setLastVersion(newVersion) executes unconditionally afterward."},
+        {"id": "E-NODE-001-C", "kind": "CODE", "location": "server/zotero.js:35-59", "observation": "The next top-item fetch is explicitly filtered by the persisted sinceVersion."}
+      ],
+      "why_it_matters": "The checkpoint claims a range was fully materialized when it was only partially processed, breaking the cache's convergence invariant and making transient upstream or database failures durable.",
+      "underlying_concepts": ["incremental checkpoint atomicity", "partial failure", "eventual convergence"],
+      "reproduction": {"status": "STATIC_PROOF", "steps_or_requirements": "Let one changed item fail in findReadableAttachment or savePaper while another succeeds; observe that setLastVersion(newVersion) still runs. Retry without another Zotero version change and the failed item is no longer returned by the since query.", "result": "The failed item is skipped after the checkpoint advances."},
+      "minimal_remediation": "Advance only to a demonstrably contiguous processed checkpoint, or persist failed item keys for retry before/alongside checkpoint advancement. Do not turn an item failure into a completed batch without recoverability.",
+      "related_files": ["server/server.js", "server/zotero.js", "server/db.js"]
+    },
+    {
+      "id": "RP-NODE-002",
+      "title": "Webpage title lookup permits server-side requests to arbitrary hosts",
+      "category": "network_io",
+      "area": {"path": "server/", "profile": "node-backend"},
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "verification_level": "CODE_PROVEN",
+      "problem": "An authenticated user can submit any http or https URL. The server fetches it directly after checking only the scheme, with redirects left enabled and no validation of resolved addresses, so loopback, link-local and private-network services are reachable from the server's network context.",
+      "evidence": [
+        {"id": "E-NODE-002-A", "kind": "CODE", "location": "server/server.js:382-390", "observation": "The route accepts a user URL when it begins with http:// or https:// and passes it to fetchPageTitle."},
+        {"id": "E-NODE-002-B", "kind": "CODE", "location": "server/server.js:133-148", "observation": "fetchPageTitle performs server-side fetch(url), follows default redirect behavior, and reads the response body without host/address policy."}
+      ],
+      "why_it_matters": "A user-facing convenience path can become an SSRF primitive for probing internal HTTP endpoints or cloud metadata services available to the deployment but not to the browser.",
+      "underlying_concepts": ["SSRF", "network trust boundary", "redirect validation"],
+      "reproduction": {"status": "STATIC_PROOF", "steps_or_requirements": "Authenticate and POST /api/papers/webpage with an HTTP URL resolving to a loopback/private/link-local address, or a public URL that redirects there.", "result": "The submitted destination reaches the native server fetch path; no destination restriction is present."},
+      "minimal_remediation": "Resolve and validate every destination and redirect hop, reject non-public address ranges and non-HTTP(S) redirects, and enforce a small response-size limit while preserving the existing timeout.",
+      "related_files": ["server/server.js", "web/src/pages/PapersList.svelte"]
+    },
+    {
+      "id": "RP-NODE-003",
+      "title": "Zotero requests have no deadline or cancellation propagation",
+      "category": "network_io",
+      "area": {"path": "server/", "profile": "node-backend"},
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "verification_level": "CODE_PROVEN",
+      "problem": "The Zotero client and OAuth helper await sixteen fetch calls without AbortSignal deadlines. Unlike the webpage-title helper, a stalled upstream response can retain an Express request and associated resources indefinitely, including inside pagination and sequential synchronization loops.",
+      "evidence": [
+        {"id": "E-NODE-003-A", "kind": "CODE", "location": "server/zotero.js:37-382", "observation": "All Zotero reads and writes call fetch without a signal; paginated loops wait for each response before progressing."},
+        {"id": "E-NODE-003-B", "kind": "CODE", "location": "server/oauth1.js:46-58", "observation": "The OAuth POST helper also has no deadline signal."},
+        {"id": "E-NODE-003-C", "kind": "CODE", "location": "server/server.js:136-143", "observation": "The repository already uses AbortController with a five-second deadline for webpage title fetches, but the shared external API path does not."}
+      ],
+      "why_it_matters": "Repeated upstream stalls can accumulate live requests and memory and make authentication, sync, note and annotation operations fail to terminate predictably.",
+      "underlying_concepts": ["network timeout", "cancellation", "resource lifetime", "partial failure"],
+      "reproduction": {"status": "STATIC_PROOF", "steps_or_requirements": "Route Zotero API traffic to a peer that accepts a connection but never completes the response.", "result": "No application deadline aborts the pending fetch."},
+      "minimal_remediation": "Add one small shared Zotero fetch helper that applies a documented deadline and optionally propagates request cancellation; keep operation-specific error handling at existing call sites.",
+      "related_files": ["server/zotero.js", "server/oauth1.js", "server/server.js"]
+    },
+    {
+      "id": "RP-NODE-004",
+      "title": "Attachment proxy buffers and inflates complete files on the event loop",
+      "category": "application_performance",
+      "area": {"path": "server/", "profile": "node-backend"},
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "verification_level": "SUSPECTED",
+      "problem": "PDF and HTML attachments are converted to a complete ArrayBuffer and then Buffer before being sent. HTML ZIP snapshots are additionally parsed and inflated synchronously with AdmZip on the request thread. No repository limit bounds attachment or expanded-entry size.",
+      "evidence": [
+        {"id": "E-NODE-004-A", "kind": "CODE", "location": "server/zotero.js:150-159", "observation": "downloadAttachmentFile materializes the complete upstream response using arrayBuffer and Buffer.from."},
+        {"id": "E-NODE-004-B", "kind": "CODE", "location": "server/server.js:450-492", "observation": "PDF responses send that whole buffer; HTML responses construct AdmZip and synchronously call entry.getData before sending."},
+        {"id": "E-NODE-004-C", "kind": "DOC", "location": "docs/stack-choice-and-scaling.md:34-47", "observation": "The repository recognizes that synchronous CPU work blocks the single Node event loop, but records no attachment size or workload bound."}
+      ],
+      "why_it_matters": "Large PDFs or compressed snapshots can multiply per-request memory and synchronous CPU time, delaying unrelated users on the same process. Actual severity depends on attachment sizes and concurrency, which were unavailable.",
+      "underlying_concepts": ["streaming I/O", "event-loop blocking", "bounded resources", "zip expansion"],
+      "reproduction": {"status": "NOT_RUN", "steps_or_requirements": "Requires authenticated Zotero data containing large PDF and compressed HTML attachments plus concurrent-request memory and event-loop-delay measurement.", "result": null},
+      "minimal_remediation": "Stream PDF bodies with cancellation and byte limits. For ZIP snapshots, reject oversized compressed/uncompressed entries and move unavoidable extraction off the request event loop if measurements show material delay.",
+      "related_files": ["server/zotero.js", "server/server.js", "docs/stack-choice-and-scaling.md"]
+    },
+    {
+      "id": "RP-WEB-001",
+      "title": "A completed stale autosave can erase the newer recoverable draft",
+      "category": "frontend_async_lifecycle",
+      "area": {"path": "web/", "profile": "frontend-web"},
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "verification_level": "CODE_PROVEN",
+      "problem": "doSave sends the current markdown value, but after awaiting it reads the mutable markdown again and unconditionally removes the session draft. If the user edits during that request, the response for the older snapshot clears the newer draft; navigating away before the next 900 ms save also cancels its timer, losing the only copy of the newer edit.",
+      "evidence": [
+        {"id": "E-WEB-001-A", "kind": "CODE", "location": "web/src/components/MarkdownNote.svelte:118-143", "observation": "The request argument is evaluated before await, while success state and clearDraft use live component state after await."},
+        {"id": "E-WEB-001-B", "kind": "CODE", "location": "web/src/components/MarkdownNote.svelte:146-169", "observation": "Each edit updates sessionStorage and schedules doSave after 900 ms; effect cleanup cancels that pending timer on rerun or unmount."},
+        {"id": "E-WEB-001-C", "kind": "DOC", "location": "README.md:105-107", "observation": "The documented contract says edits pending save remain in a session draft after leaving and returning."}
+      ],
+      "why_it_matters": "The recovery mechanism can specifically discard the newest unsaved text during ordinary edit-and-navigate timing, contradicting its stated data-loss protection.",
+      "underlying_concepts": ["async stale completion", "snapshot ownership", "durable draft lifecycle"],
+      "reproduction": {"status": "STATIC_PROOF", "steps_or_requirements": "Start an autosave for text A, type text B while it is in flight, let A complete before B's 900 ms timer fires, then navigate away before that timer fires.", "result": "A completion removes B from sessionStorage and unmount cleanup cancels B's scheduled save."},
+      "minimal_remediation": "Capture the submitted snapshot and clear the draft only when the current markdown and stored draft still equal that snapshot; preserve or explicitly flush newer content during teardown.",
+      "related_files": ["web/src/components/MarkdownNote.svelte", "README.md"]
+    },
+    {
+      "id": "RP-WEB-002",
+      "title": "Collection responses can overwrite the currently selected collection",
+      "category": "frontend_async_lifecycle",
+      "area": {"path": "web/", "profile": "frontend-web"},
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "verification_level": "CODE_PROVEN",
+      "problem": "Selecting a collection starts a request and every completion assigns the shared papers state. There is no request identity, cancellation, or selected-key check, so an older slower request can overwrite results for a newer selection while the heading still shows the newer collection.",
+      "evidence": [
+        {"id": "E-WEB-002-A", "kind": "CODE", "location": "web/src/pages/Collections.svelte:28-35", "observation": "selectCollection immediately changes selected, awaits the keyed request, and assigns papers unconditionally."},
+        {"id": "E-WEB-002-B", "kind": "CODE", "location": "web/src/pages/Collections.svelte:46-63", "observation": "The rendered heading comes from selected while the rendered list comes from the independently overwritten papers state."},
+        {"id": "E-WEB-002-C", "kind": "CODE", "location": "web/src/pages/SearchPapers.svelte:17-43", "observation": "The existing search path already uses a requestId guard to prevent the same stale-response pattern."}
+      ],
+      "why_it_matters": "Users can see and act on papers from collection A under collection B's identity, including opening or deleting an unintended item.",
+      "underlying_concepts": ["stale async response", "state coherence", "request ownership"],
+      "reproduction": {"status": "STATIC_PROOF", "steps_or_requirements": "Select collection A, return to the list before A resolves, select B, and arrange for B's response to complete before A's.", "result": "A's later completion replaces papers while selected remains B."},
+      "minimal_remediation": "Reuse the repository's request-generation guard pattern (or AbortController) and commit papers/loading only when the response still belongs to the selected collection.",
+      "related_files": ["web/src/pages/Collections.svelte", "web/src/pages/SearchPapers.svelte"]
+    }
+  ],
+  "claims": [
+    {"id": "CLAIM-001", "status": "CONTRADICTED", "evidence_ids": ["E-WEB-001-A", "E-WEB-001-B", "E-WEB-001-C"], "missing_evidence": ["browser regression test covering edit-during-save followed by navigation"]},
+    {"id": "CLAIM-002", "status": "UNVERIFIED", "evidence_ids": ["CTX-018"], "missing_evidence": ["comparable production bundle output", "runtime/render workload", "comparison method and results"]},
+    {"id": "CLAIM-003", "status": "UNVERIFIED", "evidence_ids": ["CTX-019"], "missing_evidence": ["concurrent workload", "database latency and saturation metrics", "pool and Supabase tier constraints"]}
+  ]
+}

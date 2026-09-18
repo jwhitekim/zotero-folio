@@ -1,0 +1,73 @@
+{
+  "schema_version": "2.0",
+  "repository": {"url": "https://github.com/jwhitekim/zotero-folio.git", "owner": "jwhitekim", "name": "zotero-folio", "workspace": "workspaces/jwhitekim-zotero-folio"},
+  "mode": "AUDIT",
+  "revision": {"base": null, "head": "c39928784c902fe2567ee83a766ae34d4db52c7a", "merge_base": null},
+  "stack": {"languages": ["JavaScript", "Svelte", "CSS", "SQL"], "frameworks": ["Express", "Svelte 5", "Vite", "Supabase/PostgREST", "pdf.js"]},
+  "areas": [
+    {"id": "area-root", "path": ".", "kind": "SHARED", "profiles": ["core"], "languages": ["JavaScript", "SQL"], "frameworks": ["npm", "Docker"], "modules": ["deployment", "documentation", "schema"], "evidence_ids": ["CTX-001"]},
+    {"id": "area-web", "path": "web/", "kind": "FRONTEND", "profiles": ["core", "frontend-web"], "languages": ["JavaScript", "Svelte", "CSS"], "frameworks": ["Svelte 5", "Vite", "pdf.js"], "modules": ["pages", "components", "services", "PDF utilities"], "evidence_ids": ["CTX-002"]},
+    {"id": "area-server", "path": "server/", "kind": "BACKEND", "profiles": ["core", "backend-general", "node-backend"], "languages": ["JavaScript", "SQL"], "frameworks": ["Node.js", "Express", "Supabase/PostgREST"], "modules": ["HTTP API", "Zotero client", "persistence", "OAuth", "request context"], "evidence_ids": ["CTX-003"]}
+  ],
+  "modules": [
+    {"name": "web", "locations": ["web/src"], "responsibility": "Svelte browser UI, client state, PDF rendering and annotation interactions", "evidence_ids": ["CTX-002"]},
+    {"name": "server", "locations": ["server/server.js", "server/zotero.js", "server/db.js"], "responsibility": "Express API, Zotero integration, metadata synchronization and Supabase persistence", "evidence_ids": ["CTX-003"]}
+  ],
+  "boundaries": [
+    {"name": "browser-to-api", "locations": ["web/src/services/api.js", "server/server.js"], "responsibility": "Same-origin JSON and binary HTTP boundary", "evidence_ids": ["CTX-004"]},
+    {"name": "server-to-zotero", "locations": ["server/zotero.js", "server/oauth1.js"], "responsibility": "OAuth-authenticated Zotero Web API access", "evidence_ids": ["CTX-005"]},
+    {"name": "server-to-supabase", "locations": ["server/db.js", "server/supabase.js"], "responsibility": "Service-role persistence scoped by request user", "evidence_ids": ["CTX-006"]}
+  ],
+  "major_domains": [
+    {"name": "paper-library", "locations": ["server/server.js", "web/src/pages"], "responsibility": "Paper listing, search, collections, details and deletion", "evidence_ids": ["CTX-007"]},
+    {"name": "annotations-and-notes", "locations": ["server/zotero.js", "web/src/components/MarkdownNote.svelte", "web/src/components/PdfViewer.svelte"], "responsibility": "Zotero-backed memo, highlight and ink editing", "evidence_ids": ["CTX-008"]}
+  ],
+  "build": {"systems": ["npm", "Vite", "Docker multi-stage build"], "descriptors": ["package.json", "package-lock.json", "web/package.json", "web/package-lock.json", "Dockerfile", "docker-compose.yml"], "unsafe_or_unknown_tasks": ["npm scripts and dependency install hooks were inspected as text but not executed", "Docker build was not executed"]},
+  "persistence": [{"name": "Supabase PostgreSQL", "locations": ["server/db.js", "server/supabase/schema.sql"], "responsibility": "User credentials, paper metadata cache and per-user sync checkpoint", "evidence_ids": ["CTX-006"]}],
+  "cache": [{"name": "paper metadata cache", "locations": ["server/db.js", "server/supabase/schema.sql"], "responsibility": "Per-user projection of Zotero paper metadata", "evidence_ids": ["CTX-009"]}],
+  "concurrency_components": [{"name": "request context", "locations": ["server/context.js"], "responsibility": "AsyncLocalStorage-based per-request user propagation", "evidence_ids": ["CTX-010"]}, {"name": "memo autosave", "locations": ["web/src/components/MarkdownNote.svelte"], "responsibility": "Debounced and serialized memo writes", "evidence_ids": ["CTX-011"]}],
+  "existing_abstractions": [{"name": "API client", "locations": ["web/src/services/api.js"], "responsibility": "Central browser HTTP wrapper", "evidence_ids": ["CTX-004"]}, {"name": "Zotero client", "locations": ["server/zotero.js"], "responsibility": "Zotero read/write operations", "evidence_ids": ["CTX-005"]}],
+  "common_utilities": [{"name": "PDF annotation geometry", "locations": ["web/src/utils/pdf-highlight.js", "web/src/utils/pdf-ink.js"], "responsibility": "Highlight and ink conversion helpers", "evidence_ids": ["CTX-012"]}],
+  "common_components": [{"name": "PaperCard", "locations": ["web/src/components/PaperCard.svelte"], "responsibility": "Shared paper presentation and actions", "evidence_ids": ["CTX-013"]}],
+  "hooks": [],
+  "important_services": [{"name": "synchronization", "locations": ["server/server.js:177-236"], "responsibility": "Incremental Zotero-to-Supabase metadata synchronization", "evidence_ids": ["CTX-014"]}],
+  "domain_modules": [{"name": "memo", "locations": ["server/server.js:424-448", "web/src/components/MarkdownNote.svelte"], "responsibility": "Zotero child-note editing with local draft recovery", "evidence_ids": ["CTX-011"]}],
+  "repositories": [{"name": "db.js", "locations": ["server/db.js"], "responsibility": "User-scoped Supabase queries and mapping", "evidence_ids": ["CTX-006"]}],
+  "external_integrations": [{"name": "Zotero Web API", "locations": ["server/zotero.js", "server/oauth1.js"], "responsibility": "OAuth, library synchronization, attachments and annotations", "evidence_ids": ["CTX-005"]}, {"name": "Supabase", "locations": ["server/supabase.js", "server/db.js"], "responsibility": "PostgreSQL access via service role", "evidence_ids": ["CTX-006"]}],
+  "entry_paths": [
+    {"name": "browser application", "steps": ["web/src/main.js", "web/src/App.svelte", "web/src/pages/*", "web/src/services/api.js"], "evidence_ids": ["CTX-002", "CTX-004"]},
+    {"name": "HTTP server", "steps": ["server/server.js", "server/context.js", "server/db.js or server/zotero.js"], "evidence_ids": ["CTX-003", "CTX-010"]}
+  ],
+  "execution_risks": [
+    {"location": "package.json", "trigger": "npm install/start/build", "risk": "Executes third-party package lifecycle code or the target application with network and credentials", "evidence_ids": ["CTX-015"]},
+    {"location": "Dockerfile", "trigger": "docker build or docker compose up", "risk": "Downloads dependencies and builds/runs untrusted target code", "evidence_ids": ["CTX-016"]}
+  ],
+  "technical_claims": [
+    {"id": "CLAIM-001", "text": "Unsaved memo edits survive leaving and returning through a sessionStorage draft.", "location": "README.md:105-107", "area_ids": ["area-web"], "evidence_ids": ["CTX-017"]},
+    {"id": "CLAIM-002", "text": "Svelte has low runtime overhead and a light bundle appropriate for this personal tool.", "location": "docs/stack-choice-and-scaling.md:25-32", "area_ids": ["area-web"], "evidence_ids": ["CTX-018"]},
+    {"id": "CLAIM-003", "text": "Supabase concurrency throughput is not a bottleneck.", "location": "docs/stack-choice-and-scaling.md:49-56", "area_ids": ["area-server"], "evidence_ids": ["CTX-019"]}
+  ],
+  "change_scope": null,
+  "evidence": [
+    {"id": "CTX-001", "kind": "CONFIG", "location": "package.json", "observation": "Root Node package builds web and starts server/server.js."},
+    {"id": "CTX-002", "kind": "CODE", "location": "web/src", "observation": "Svelte browser application with pages, components, API service and PDF utilities."},
+    {"id": "CTX-003", "kind": "CODE", "location": "server/server.js", "observation": "Express backend entry point with API routes and static web serving."},
+    {"id": "CTX-004", "kind": "CODE", "location": "web/src/services/api.js:6-52", "observation": "One shared request wrapper owns browser API calls."},
+    {"id": "CTX-005", "kind": "CODE", "location": "server/zotero.js", "observation": "Central Zotero client owns authenticated reads and writes."},
+    {"id": "CTX-006", "kind": "CODE", "location": "server/db.js", "observation": "Persistence methods consistently derive user_id from request context."},
+    {"id": "CTX-007", "kind": "CODE", "location": "server/server.js:346-486", "observation": "Paper list, detail, webpage, delete, memo and attachment routes."},
+    {"id": "CTX-008", "kind": "CODE", "location": "server/server.js:495-720", "observation": "Highlight and ink API paths validate ownership against the paper attachment."},
+    {"id": "CTX-009", "kind": "DOC", "location": "server/supabase/schema.sql:45-71", "observation": "Paper table is explicitly a metadata cache with user-scoped uniqueness and query indexes."},
+    {"id": "CTX-010", "kind": "CODE", "location": "server/context.js:12-29", "observation": "AsyncLocalStorage carries the authenticated user through asynchronous request work."},
+    {"id": "CTX-011", "kind": "CODE", "location": "web/src/components/MarkdownNote.svelte:118-169", "observation": "Autosave serializes requests and mirrors edits to sessionStorage."},
+    {"id": "CTX-012", "kind": "CODE", "location": "web/src/utils", "observation": "PDF-specific reusable geometry, touch and browser compatibility utilities."},
+    {"id": "CTX-013", "kind": "CODE", "location": "web/src/components/PaperCard.svelte", "observation": "Paper presentation is reused by home, list, search and collection pages."},
+    {"id": "CTX-014", "kind": "CODE", "location": "server/server.js:177-236", "observation": "Synchronization processes incremental changes, tolerates per-item errors, then writes a global checkpoint."},
+    {"id": "CTX-015", "kind": "CONFIG", "location": "package.json:7-12", "observation": "Scripts install dependencies, build the web app, run the server and perform migration."},
+    {"id": "CTX-016", "kind": "CONFIG", "location": "Dockerfile:3-30", "observation": "Container build runs npm ci and npm run build before starting the application."},
+    {"id": "CTX-017", "kind": "DOC", "location": "README.md:105-107", "observation": "README promises that pre-save edits remain recoverable after navigation."},
+    {"id": "CTX-018", "kind": "DOC", "location": "docs/stack-choice-and-scaling.md:25-32", "observation": "Framework choice includes comparative runtime and bundle-size claims without recorded measurements."},
+    {"id": "CTX-019", "kind": "DOC", "location": "docs/stack-choice-and-scaling.md:49-56", "observation": "The document declares database concurrent-write throughput non-bottleneck without workload evidence."}
+  ],
+  "limitations": ["No target-provided code, dependency installer, build, test, container, migration or application was executed.", "No credentials, Supabase database, Zotero account, browser runtime, production traffic, query plan or performance measurements were available.", "Runtime-dependent impact is reported as SUSPECTED; deterministic code paths are CODE_PROVEN."]
+}

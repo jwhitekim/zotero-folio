@@ -1,0 +1,36 @@
+{
+  "schema_version": "2.0",
+  "repository": "jwhitekim/zotero-folio",
+  "mode": "AUDIT",
+  "revision": {"base": null, "head": "c39928784c902fe2567ee83a766ae34d4db52c7a"},
+  "rubric": "core-v1 + frontend-web-v1 + backend-v1 + node-backend-v1",
+  "selected_profiles": ["core", "frontend-web", "backend-general", "node-backend"],
+  "overall": {"normalized_score": 69.4, "applicable_earned": 86, "applicable_max": 124},
+  "categories": [
+    {"id": "repository_understanding", "profile": "core", "area_path": ".", "weight": 12, "status": "APPLICABLE", "earned": 12, "finding_ids": [], "positive_evidence_ids": ["CTX-004", "CTX-005", "CTX-006", "CTX-013"], "rationale": "The repository consistently reuses central API, Zotero, persistence and presentation abstractions; no semantic duplicate responsibility was established."},
+    {"id": "design_integrity", "profile": "core", "area_path": ".", "weight": 10, "status": "APPLICABLE", "earned": 9, "finding_ids": [], "positive_evidence_ids": ["CTX-004", "CTX-005", "CTX-010"], "rationale": "Browser, transport, integration and persistence boundaries are explicit; no repository-wide redesign is warranted."},
+    {"id": "change_discipline", "profile": "core", "area_path": ".", "weight": 10, "status": "N_A", "earned": null, "finding_ids": [], "positive_evidence_ids": ["CTX-001"], "rationale": "Audit mode has no base/head attribution scope, so introduced-change proportionality cannot be scored."},
+    {"id": "code_quality", "profile": "core", "area_path": ".", "weight": 8, "status": "APPLICABLE", "earned": 5, "finding_ids": ["RP-NODE-001"], "positive_evidence_ids": ["CTX-008", "CTX-010"], "rationale": "Control flow and validation are generally explicit, but sync error handling violates its checkpoint completion contract."},
+
+    {"id": "frontend_responsibility", "profile": "frontend-web", "area_path": "web/", "weight": 10, "status": "APPLICABLE", "earned": 9, "finding_ids": [], "positive_evidence_ids": ["CTX-004", "CTX-013"], "rationale": "Pages reuse the shared API client and PaperCard; responsibility was assessed by behavior rather than component length."},
+    {"id": "frontend_state", "profile": "frontend-web", "area_path": "web/", "weight": 10, "status": "APPLICABLE", "earned": 8, "finding_ids": ["RP-WEB-002"], "positive_evidence_ids": ["CTX-011"], "rationale": "Most state is local or derived, but collection identity and result state can become incoherent under response reordering."},
+    {"id": "frontend_async_lifecycle", "profile": "frontend-web", "area_path": "web/", "weight": 10, "status": "APPLICABLE", "earned": 4, "finding_ids": ["RP-WEB-001", "RP-WEB-002"], "positive_evidence_ids": ["E-WEB-002-C"], "rationale": "Listener cleanup and search stale-response protection are present, while two user-facing async paths have deterministically unsafe completion ownership."},
+    {"id": "frontend_architecture", "profile": "frontend-web", "area_path": "web/", "weight": 10, "status": "APPLICABLE", "earned": 9, "finding_ids": [], "positive_evidence_ids": ["CTX-002", "CTX-004", "CTX-012", "CTX-013"], "rationale": "The Svelte application has proportionate page, component, service and PDF utility boundaries without speculative wrappers."},
+
+    {"id": "cs_fundamentals", "profile": "backend-general", "area_path": "server/", "weight": 12, "status": "APPLICABLE", "earned": 8, "finding_ids": ["RP-NODE-004"], "positive_evidence_ids": ["CTX-010"], "rationale": "Request context is concurrency-safe, but attachment buffering and synchronous ZIP inflation create an unbounded event-loop resource path."},
+    {"id": "database", "profile": "backend-general", "area_path": "server/", "weight": 10, "status": "APPLICABLE", "earned": 9, "finding_ids": [], "positive_evidence_ids": ["CTX-006", "CTX-009"], "rationale": "Queries are user scoped and schema constraints/indexes correspond to concrete access paths; no plan-backed performance defect was asserted."},
+    {"id": "transaction_concurrency", "profile": "backend-general", "area_path": "server/", "weight": 10, "status": "APPLICABLE", "earned": 5, "finding_ids": ["RP-NODE-001"], "positive_evidence_ids": ["CTX-008"], "rationale": "Zotero version preconditions protect note and delete writes, but the incremental cache checkpoint is not consistent with partial failures."},
+    {"id": "network_io", "profile": "backend-general", "area_path": "server/", "weight": 8, "status": "APPLICABLE", "earned": 2, "finding_ids": ["RP-NODE-002", "RP-NODE-003"], "positive_evidence_ids": ["E-NODE-003-C"], "rationale": "One fetch path has a deadline, but arbitrary destination access and missing Zotero deadlines materially weaken the network boundary."},
+    {"id": "application_performance", "profile": "backend-general", "area_path": "server/", "weight": 8, "status": "APPLICABLE", "earned": 4, "finding_ids": ["RP-NODE-004"], "positive_evidence_ids": ["CTX-018"], "rationale": "The architecture favors asynchronous I/O, but large attachment handling is unbounded; impact remains suspected without measurements."},
+    {"id": "caching_distributed", "profile": "backend-general", "area_path": "server/", "weight": 6, "status": "N_A", "earned": null, "finding_ids": [], "positive_evidence_ids": ["CTX-009"], "rationale": "Metadata caching is part of the product, but no remote-cache requirement or cache stampede path was evidenced; Redis absence is neutral."},
+    {"id": "observability", "profile": "backend-general", "area_path": "server/", "weight": 6, "status": "APPLICABLE", "earned": 2, "finding_ids": [], "positive_evidence_ids": ["CTX-014"], "rationale": "Contextual error logs exist, but no metrics, traces, query counts, latency distributions, load tests or reproducible performance measurements were found."}
+  ],
+  "evidence_coverage": 78,
+  "runtime_verification": "NONE",
+  "finding_counts": {"CRITICAL": 0, "HIGH": 2, "MEDIUM": 4, "LOW": 0},
+  "claims": [
+    {"id": "CLAIM-001", "text": "Unsaved memo edits survive leaving and returning through a sessionStorage draft.", "location": "README.md:105-107", "area_path": "web/", "profile": "frontend-web", "status": "CONTRADICTED", "evidence_ids": ["E-WEB-001-A", "E-WEB-001-B", "E-WEB-001-C"], "missing_evidence": ["browser regression test for edit-during-save navigation"]},
+    {"id": "CLAIM-002", "text": "Svelte's low runtime overhead and light bundle make it suitable for this tool.", "location": "docs/stack-choice-and-scaling.md:25-32", "area_path": "web/", "profile": "frontend-web", "status": "UNVERIFIED", "evidence_ids": ["CTX-018"], "missing_evidence": ["bundle comparison", "runtime workload", "measurement results"]},
+    {"id": "CLAIM-003", "text": "Supabase concurrent-write throughput is not a bottleneck.", "location": "docs/stack-choice-and-scaling.md:49-56", "area_path": "server/", "profile": "backend-general", "status": "UNVERIFIED", "evidence_ids": ["CTX-019"], "missing_evidence": ["concurrent workload", "database metrics", "pool and service-tier constraints"]}
+  ]
+}
