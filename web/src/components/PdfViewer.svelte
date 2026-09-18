@@ -1093,6 +1093,9 @@
 
   // 펜 모드에서 스트로크 시작. 시작점이 페이지 위가 아니면(여백) 무시한다.
   function onDrawPointerDown(e) {
+    // 손가락 터치는 그리기가 아니라 팬(스크롤)이다 — 스타일러스(pen)나 데스크탑
+    // 마우스(mouse)만 그리기를 시작한다.
+    if (e.pointerType === 'touch') return;
     if ((!penMode && !highlighterPenMode) || !itemKey || isInsidePopup(e)) return;
     const pageNumber = pageNumberAt(e.clientX, e.clientY);
     if (!pageNumber) return;
@@ -1271,6 +1274,9 @@
   }
 
   function onErasePointerDown(e) {
+    // 손가락 터치는 지우기가 아니라 팬(스크롤)이다 — 스타일러스(pen)나 데스크탑
+    // 마우스(mouse)만 지우기를 시작한다.
+    if (e.pointerType === 'touch') return;
     if (!eraserMode || !itemKey || isInsidePopup(e)) return;
     closePopups();
     erasing = true;

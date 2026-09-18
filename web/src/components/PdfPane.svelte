@@ -138,9 +138,6 @@
     getZoom: () => pdfZoom,
     zoomTo,
     getScrollEl: () => pdfScrollEl,
-    // 펜/지우개 어느 쪽이든 그리기 도구가 켜져 있으면 한 손가락 팬을 막고
-    // 그리기/지우기 핸들러에 넘긴다.
-    isPenMode: () => penMode || eraserMode || highlighterPenMode,
   });
 </script>
 

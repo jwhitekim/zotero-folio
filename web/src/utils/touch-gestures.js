@@ -24,23 +24,29 @@
 //   이벤트는 그 iframe의 getSelection을 넘겨야 그 문서의 선택을 본다.
 // - clientYOffset(): iframe에서 온 이벤트의 clientY를 바깥 문서 좌표로 옮길
 //   보정값(핀치 중심 앵커용). 기본 0(같은 문서).
-// - isPenMode(): 펜(필기) 모드가 켜져 있는지. 켜져 있으면 한 손가락 드래그를
-//   팬(스크롤)으로 쓰지 않고 PdfViewer의 그리기 핸들러에 넘긴다 — 형광펜 모드가
-//   텍스트 선택으로 팬을 대신 막았던 것처럼, 펜 모드 자체가 팬을 막는 신호다.
-//   두 손가락 핀치 확대는 펜 모드에서도 그대로 동작한다.
+//
+// 스타일러스(pen)/마우스는 이 모듈에 애초에 안 들어온다(down 첫 줄에서 걸러짐).
+// 그래서 그리기 도구가 켜져 있어도 여기 들어오는 터치는 전부 팬/핀치/선택으로만
+// 다룬다 — 그리기는 PdfViewer가 pointerType으로 직접 스타일러스만 받아 처리한다.
 export function createTouchGestures({
   getZoom,
   zoomTo,
   getScrollEl,
   getSelection = () => (typeof window !== 'undefined' ? window.getSelection() : null),
   clientYOffset = () => 0,
-  isPenMode = () => false,
 }) {
   const pointers = new Map(); // pointerId -> { x, y }
   // null | 'pan' | 'pinch' | 'select'
   //   'select'는 "이 한 손가락 드래그는 텍스트 선택이니 우리는 손 떼고
   //   브라우저 네이티브 선택에 맡긴다"는 뜻 — 그 제스처가 끝날 때까지 유지된다.
   let mode = null;
+
+  // 관성 스크롤 상태 — 팬 중 손가락 이동 속도(px/ms)를 추적해뒀다가, 마지막
+  // 손가락이 떨어질 때 그 속도로 감속 애니메이션을 이어간다(모바일 앱 스크롤 느낌).
+  let velX = 0;
+  let velY = 0;
+  let lastPanTime = 0; // 마지막으로 팬을 반영한 시각(속도 계산·정지 판정용)
+  let inertiaId = 0;
 
   // 핀치 상태
   let startDist = 0;
@@ -78,10 +84,53 @@ export function createTouchGestures({
       pendingDx = pendingDy = 0;
       return;
     }
+    // 손가락 이동 속도(px/ms)를 지수 평활로 추적한다 — 손을 뗄 때 관성 시작
+    // 속도로 쓴다. dt가 비정상(0 또는 너무 큼: 손가락이 잠깐 멈춤)이면 건너뛴다.
+    const now =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const dt = now - lastPanTime;
+    if (dt > 0 && dt < 100) {
+      velX = velX * 0.7 + (pendingDx / dt) * 0.3;
+      velY = velY * 0.7 + (pendingDy / dt) * 0.3;
+    }
+    lastPanTime = now;
     // 손가락을 아래로 끌면(dy>0) 내용이 따라 내려와야 하므로 scrollTop은 줄인다.
     el.scrollTop -= pendingDy;
     el.scrollLeft -= pendingDx;
     pendingDx = pendingDy = 0;
+  }
+
+  function cancelInertia() {
+    if (inertiaId) {
+      cancelAnimationFrame(inertiaId);
+      inertiaId = 0;
+    }
+  }
+
+  // 손을 뗀 순간의 속도로 시작해 매 프레임 지수 감쇠하며 스크롤을 이어간다.
+  // 속도가 충분히 작아지면 멈춘다. 감쇠 계수는 16ms(약 60fps) 기준 프레임당
+  // 0.95이며, 실제 프레임 간격(dt)에 맞춰 보정한다.
+  function startInertia() {
+    const el = getScrollEl?.();
+    if (!el) return;
+    cancelInertia();
+    let last =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const step = (now) => {
+      const dt = now - last;
+      last = now;
+      el.scrollTop -= velY * dt;
+      el.scrollLeft -= velX * dt;
+      const decay = Math.pow(0.95, dt / 16);
+      velX *= decay;
+      velY *= decay;
+      if (Math.hypot(velX, velY) < 0.02) {
+        inertiaId = 0;
+        return;
+      }
+      inertiaId = requestAnimationFrame(step);
+    };
+    inertiaId = requestAnimationFrame(step);
   }
 
   function flush() {
@@ -109,11 +158,17 @@ export function createTouchGestures({
     lastX = p.x;
     lastY = p.y;
     pendingDx = pendingDy = 0;
+    // 새 팬은 속도 추적을 처음부터 다시 시작한다.
+    velX = velY = 0;
+    lastPanTime =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
   }
 
   function down(e) {
     // 마우스/펜은 건드리지 않는다(데스크탑 경로 유지). 터치만 우리가 전담한다.
     if (e.pointerType !== 'touch') return;
+    // 관성 스크롤 도중 다시 만지면 즉시 멈추고 새 팬으로 자연스럽게 이어받는다.
+    cancelInertia();
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (pointers.size === 2) {
@@ -122,10 +177,7 @@ export function createTouchGestures({
       startZoom = getZoom();
       mode = 'pinch';
     } else if (pointers.size === 1) {
-      // 펜 모드 중 한 손가락은 그리기다 — 팬을 시작하지 않고 PdfViewer의 그리기
-      // 핸들러에 맡긴다.
-      if (isPenMode()) mode = 'draw';
-      else beginPan({ x: e.clientX, y: e.clientY });
+      beginPan({ x: e.clientX, y: e.clientY });
     }
   }
 
@@ -143,7 +195,6 @@ export function createTouchGestures({
 
     if (pointers.size !== 1) return;
     if (mode === 'select') return; // 이 드래그는 텍스트 선택 — 끝까지 관여 안 함
-    if (mode === 'draw') return; // 펜 모드 그리기 — 팬하지 않고 그리기 핸들러에 맡긴다
 
     // 한 손가락 드래그가 텍스트 선택인지 판별한다. 태블릿에서 텍스트 선택은
     // 길게 누르기(long-press)로 시작되므로, 손가락이 실제로 움직이기 시작할
@@ -177,13 +228,21 @@ export function createTouchGestures({
       startZoom = getZoom();
       mode = 'pinch';
     } else if (pointers.size === 1) {
-      // 핀치 → 한 손가락: 펜 모드면 그리기로, 아니면 남은 손가락으로 팬을
-      // 이어간다(튐 방지 위해 좌표 리셋).
-      if (isPenMode()) mode = 'draw';
-      else beginPan(twoPoints()[0]);
+      // 핀치 → 한 손가락: 남은 손가락으로 팬을 이어간다(튐 방지 위해 좌표 리셋).
+      beginPan(twoPoints()[0]);
     } else {
-      mode = null;
+      // 마지막 손가락이 떨어졌다. 방금까지 팬 중이었고 속도가 충분하면 관성
+      // 스크롤을 이어간다(손을 뗀 직후여야 함 — 잠깐 멈췄다 떼면 튀지 않게).
+      const now =
+        typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const fresh = now - lastPanTime < 80;
       cancelPending();
+      if (mode === 'pan' && fresh && Math.hypot(velX, velY) >= 0.02) {
+        startInertia();
+      } else {
+        velX = velY = 0;
+      }
+      mode = null;
     }
   }
 
