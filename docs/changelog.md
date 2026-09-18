@@ -96,7 +96,7 @@
 - 프로젝트와 무관하거나 내장 도구와 중복되는 스킬 3종
   (`approval-check`, `plan`, `verify-completion`) 정리(`33e086c`).
 - Folio 전체 제품 스펙을 코드베이스 기준으로 사후 정리
-  ([product-spec.md](product-spec.md), `b7d0416`), `docs/` 안내 문서
+  ([product-spec.md](overview/product-spec.md), `b7d0416`), `docs/` 안내 문서
   추가(`0d2dfaf`).
 - 태블릿/모바일 터치 UX 논의(핀치 확대, ink 필기, 추가 디자인 방향)
   — [tablet-touch-ux-ideas.md](tablet-touch-ux-ideas.md).
@@ -105,5 +105,5 @@
 
 ## 관련 문서
 
-- [product-spec.md](product-spec.md) — 현재 기능/아키텍처 전체 스펙.
+- [product-spec.md](overview/product-spec.md) — 현재 기능/아키텍처 전체 스펙.
 - [README.md](README.md) — `docs/` 전체 목록.

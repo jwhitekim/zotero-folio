@@ -7,7 +7,7 @@ Zotero ink annotation 데이터 형식 기록. 실측으로 확정 완료.
 
 태블릿 UX 개선 논의 중 "펜으로 글을 쓰거나 형광펜을 칠할 수 있는 UX"
 필요성이 제기됨. 형광펜(하이라이트)은 이미 구현 완료(`annotationType:
-'highlight'`, `docs/pdf-highlight-popup.md` 참고). 자유 필기는 Zotero의
+'highlight'`, `docs/pdf/pdf-highlight-popup.md` 참고). 자유 필기는 Zotero의
 별도 annotation 타입인 ink를 활용하는 방향.
 
 ## 확인 방법
@@ -15,7 +15,7 @@ Zotero ink annotation 데이터 형식 기록. 실측으로 확정 완료.
 1차로 Zotero 공식 소스코드 저장소([zotero/reader](https://github.com/zotero/reader),
 `src/common/types.ts`)에서 타입 정의를 확인해 `paths` 필드 존재와
 `annotationType`에 `'ink'`가 포함됨을 확인. 다만 선 굵기 필드는 그
-타입 정의만으로는 확인 실패(`docs/pdf-highlight-popup-safari-callout.md`
+타입 정의만으로는 확인 실패(`docs/pdf/pdf-highlight-popup-safari-callout.md`
 작성 시점 기준 미확인 상태로 남아 있었음).
 
 2차로 실측 확인: Zotero 데스크톱에서 실제 PDF에 ink 선 하나를 그은 뒤,

@@ -1,7 +1,7 @@
 # PDF 터치 핀치 확대/축소 — touch-action 충돌 조사
 
 태블릿 실기기 테스트에서 핀치 확대/축소가 "반대로 되거나 갑자기
-튀는" 문제가 발생해 원인을 조사한 기록. `docs/tablet-touch-ux-ideas.md`
+튀는" 문제가 발생해 원인을 조사한 기록. `docs/touch/tablet-touch-ux-ideas.md`
 논의에서 이어지는 구현 시행착오.
 
 ## 증상 변화 (3차례 반복)

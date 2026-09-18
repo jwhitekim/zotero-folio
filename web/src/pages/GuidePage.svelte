@@ -12,7 +12,7 @@ const steps=[
 {eyebrow:'설정 완료',title:'첫 논문을 열면 모든 준비가 끝나요',description:'읽고 싶은 논문을 선택해 PDF와 메모 화면을 열어 보세요. 이제 하이라이트와 기록을 한곳에서 이어갈 수 있습니다.',tip:'원본 논문과 서지 정보는 Zotero에 그대로 안전하게 남아 있어요.',image:'/images/zotero-setup/8.png',alt:'Folio에서 논문을 여는 화면'}];
 
 // 등장 애니메이션: IntersectionObserver + CSS transition 조합(레퍼런스는
-// docs/guide-scroll-reveal-research.md). 각 요소를 onMount에서 한 번만
+// docs/design/guide-scroll-reveal-research.md). 각 요소를 onMount에서 한 번만
 // observe하고, 화면에 처음 들어오는 순간 revealed 상태를 true로 바꿔
 // unobserve — 한 번 나타난 요소는 다시 숨기지 않는 1회성 리빌.
 let motionReady = $state(false);

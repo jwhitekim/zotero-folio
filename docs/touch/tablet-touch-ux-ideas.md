@@ -82,4 +82,4 @@ Zotero가 `ink` annotation 타입을 네이티브로 지원(형식 조사는
 
 - [pdf-ink-annotation-research.md](pdf-ink-annotation-research.md)
 - [pdf-highlight-popup.md](pdf-highlight-popup.md)
-- [product-spec.md](product-spec.md)
+- [product-spec.md](../overview/product-spec.md)
