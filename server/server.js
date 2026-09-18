@@ -10,6 +10,10 @@
 
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
+import dns from 'node:dns';
+import net from 'node:net';
 import express from 'express';
 import session from 'express-session';
 import path from 'node:path';
@@ -20,6 +24,8 @@ import TurndownService from 'turndown';
 import {
   getLastVersion,
   setLastVersion,
+  getFailedItemKeys,
+  setFailedItemKeys,
   savePaper,
   listPapers,
   getPaper,
@@ -130,20 +136,133 @@ function cleanTitle(title, itemType) {
   return idx > 0 ? title.slice(0, idx).trim() : title;
 }
 
+// --- SSRF 방어 -------------------------------------------------------------
+// 웹페이지 추가는 서버가 사용자가 준 URL로 직접 요청을 날린다. 스킴만 보고
+// 통과시키면 인증된 사용자가 서버를 통해 내부망(127.0.0.1, 클라우드 메타데이터
+// 169.254.169.254, 사설 대역 등)을 찔러볼 수 있다 — 멀티유저가 된 지금 더
+// 위험하다. 그래서 호스트를 실제 IP로 해석한 뒤 그 IP가 내부/특수 대역이면
+// 거부하고, 리다이렉트도 홉마다 같은 검증을 반복한다. 외부 패키지 없이
+// node 표준 모듈(dns/net/http/https)만 쓴다.
+
+const SSRF_MAX_REDIRECTS = 5;
+const SSRF_MAX_BYTES = 1024 * 1024; // 1MB — 제목은 <head>에 있어 이 정도면 충분
+const SSRF_TIMEOUT_MS = 5000;
+
+class BlockedAddressError extends Error {}
+
+function isBlockedIpv4(ip) {
+  const p = ip.split('.').map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = p;
+  if (a === 0) return true; // 0.0.0.0/8
+  if (a === 10) return true; // 10/8 (사설)
+  if (a === 127) return true; // 127/8 (루프백)
+  if (a === 169 && b === 254) return true; // 169.254/16 (링크로컬 — 클라우드 메타데이터)
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12 (사설)
+  if (a === 192 && b === 168) return true; // 192.168/16 (사설)
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 (CGNAT)
+  return false;
+}
+
+function isBlockedIp(ip) {
+  const fam = net.isIP(ip);
+  if (fam === 4) return isBlockedIpv4(ip);
+  if (fam === 6) {
+    const lower = ip.toLowerCase();
+    // IPv4-매핑(::ffff:a.b.c.d)은 안쪽 v4 기준으로 판정한다.
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isBlockedIpv4(mapped[1]);
+    if (lower === '::1' || lower === '::') return true; // 루프백 / 미지정
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 (ULA)
+    if (/^fe[89ab]/.test(lower)) return true; // fe80::/10 (링크로컬)
+    return false;
+  }
+  return true; // IP 형식이 아니면(파싱 실패) 막는 쪽으로
+}
+
+// dns.lookup을 감싸 "내부망으로 해석되는 호스트"를 걸러내는 커스텀 lookup.
+// http/https 요청의 lookup 옵션으로 넘기면, 실제 소켓이 붙는 주소가 바로 이
+// 함수가 돌려준 (검증 통과한) 주소가 되므로 DNS rebinding(검증 시점과 접속
+// 시점 사이 IP가 바뀌는 것)도 막힌다.
+function safeLookup(hostname, options, callback) {
+  const cb = typeof options === 'function' ? options : callback;
+  dns.lookup(hostname, { all: true }, (err, addresses) => {
+    if (err) return cb(err);
+    const list = Array.isArray(addresses) ? addresses : [addresses];
+    const ok = list.find((a) => !isBlockedIp(a.address));
+    if (!ok) return cb(new BlockedAddressError(`내부망/사설 주소로 해석되는 호스트입니다: ${hostname}`));
+    cb(null, ok.address, ok.family);
+  });
+}
+
+// 사용자가 준 URL이 내부망으로 해석되는지 미리 검사한다 (라우트에서 400 응답용).
+async function assertPublicUrl(url) {
+  const { hostname } = new URL(url);
+  await new Promise((resolve, reject) => {
+    safeLookup(hostname, {}, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+// 리다이렉트를 자동 추적하지 않고 홉마다 직접 검증하며 따라간다. 각 요청은
+// safeLookup으로 내부망 접속을 차단하고, 바디는 1MB로 제한한다.
+function safeGet(urlStr, redirectsLeft) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL(urlStr);
+    } catch {
+      return reject(new Error('URL 파싱 실패'));
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return reject(new BlockedAddressError('http/https만 허용됩니다'));
+    }
+    const lib = url.protocol === 'https:' ? https : http;
+    const req = lib.get(
+      url,
+      {
+        lookup: safeLookup,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Folio/1.0)' },
+        timeout: SSRF_TIMEOUT_MS,
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume(); // 리다이렉트 바디는 버린다
+          if (redirectsLeft <= 0) return reject(new Error('리다이렉트가 너무 많습니다'));
+          const next = new URL(res.headers.location, url).toString();
+          return resolve(safeGet(next, redirectsLeft - 1));
+        }
+        if (status < 200 || status >= 300) {
+          res.resume();
+          return resolve(null);
+        }
+        let size = 0;
+        const chunks = [];
+        res.on('data', (c) => {
+          chunks.push(c);
+          size += c.length;
+          if (size > SSRF_MAX_BYTES) {
+            res.destroy();
+            resolve(Buffer.concat(chunks).toString('utf8'));
+          }
+        });
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        res.on('error', reject);
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('요청 시간이 초과되었습니다')));
+    req.on('error', reject);
+  });
+}
+
 // 웹페이지 추가 시 제목을 직접 입력 안 하면 페이지 <title> 태그로 채운다.
-// 실패해도(타임아웃, 4xx 등) 조용히 넘어가고 URL 자체를 제목으로 쓴다 —
-// 이 도구의 역할은 "Zotero에 아이템을 만드는 것"까지고, 본문 파싱은 하지 않는다.
+// 실패해도(타임아웃, 4xx, 내부망 리다이렉트 등) 조용히 넘어가고 URL 자체를
+// 제목으로 쓴다 — 이 도구의 역할은 "Zotero에 아이템을 만드는 것"까지고,
+// 본문 파싱은 하지 않는다.
 async function fetchPageTitle(url) {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Folio/1.0)' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const html = await res.text();
+    const html = await safeGet(url, SSRF_MAX_REDIRECTS);
+    if (!html) return null;
     const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
     return match ? match[1].trim().replace(/\s+/g, ' ') : null;
   } catch (err) {
@@ -181,6 +300,23 @@ async function doSync() {
   // 기존 아이템에 첨부파일만 새로 붙은 경우 부모 아이템 자체는 top-level
   // since 조회에 안 걸린다 (부모 version이 안 바뀜) — 별도로 찾아서 합친다.
   const topKeys = new Set(items.map((i) => i.key));
+
+  // 지난 동기화에서 캐싱에 실패한 아이템들은 그 뒤로 다시 안 바뀌면 since
+  // 조회에 영영 안 걸린다 — lastVersion이 이미 넘어갔기 때문. 버전과 무관하게
+  // 이번에도 재조회해서 다시 시도한다. 이 재시도 결과에 따라 실패 목록을
+  // 갱신하므로, 시작 집합은 이전 실패 목록으로 잡는다.
+  const failedKeys = new Set(await getFailedItemKeys());
+  for (const key of failedKeys) {
+    if (topKeys.has(key)) continue;
+    try {
+      const item = await fetchItem(key);
+      items.push(item);
+      topKeys.add(key);
+    } catch (err) {
+      // 재조회 자체가 실패하면 다음 번에도 다시 시도하도록 실패 목록에 남겨둔다.
+      console.error(`[sync] 실패 항목 재조회 실패: ${key} - ${err.message}`);
+    }
+  }
   try {
     const parentKeys = await fetchChangedAttachmentParentKeys(lastVersion);
     for (const key of parentKeys) {
@@ -215,8 +351,12 @@ async function doSync() {
         collections: item.data.collections || [],
       });
       cached++;
+      // 성공했으니 실패 목록에서 뺀다 (이번에 재시도해서 성공한 경우 포함).
+      failedKeys.delete(item.key);
     } catch (err) {
       console.error(`[sync] 캐시 실패: ${item.data.title} - ${err.message}`);
+      // 다음 동기화 때 버전과 무관하게 다시 시도하도록 실패 목록에 넣는다.
+      failedKeys.add(item.key);
     }
   }
 
@@ -227,11 +367,15 @@ async function doSync() {
     for (const key of deletedKeys) {
       await deletePaper(key);
       removed++;
+      // Zotero에서 지워진 아이템은 더 이상 재시도 대상이 아니므로 큐에서도 뺀다
+      // (없으면 무시) — 사라진 키를 매번 404로 재조회하지 않도록.
+      failedKeys.delete(key);
     }
   } catch (err) {
     console.error(`[sync] 삭제 항목 조회 실패: ${err.message}`);
   }
 
+  await setFailedItemKeys([...failedKeys]);
   await setLastVersion(newVersion);
   return { checked: items.length, cached, removed };
 }
@@ -383,6 +527,13 @@ app.post('/api/papers/webpage', async (req, res) => {
   const url = (req.body?.url || '').trim();
   if (!/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: '올바른 URL이 아닙니다 (http:// 또는 https://로 시작해야 해요)' });
+  }
+
+  // 스킴만으로는 부족하다 — 호스트가 실제로 내부망/사설 IP로 해석되면 거부(SSRF).
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    return res.status(400).json({ error: '내부망/사설 주소로는 웹페이지를 추가할 수 없습니다' });
   }
 
   try {

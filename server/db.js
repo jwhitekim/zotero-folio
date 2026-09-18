@@ -92,6 +92,42 @@ export async function setLastVersion(version) {
   );
 }
 
+// 이전 동기화에서 캐싱에 실패한 아이템 키 목록. 다음 동기화 때 버전과
+// 무관하게 다시 시도하기 위해 lastVersion과 같은 key/value 저장소에
+// JSON 배열 문자열로 들고 있는다 (새 테이블을 만들지 않기 위함).
+export async function getFailedItemKeys() {
+  const { id: userId } = requireUser();
+  const row = unwrap(
+    await supabase
+      .from(SYNC_STATE)
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'failedItemKeys')
+      .maybeSingle(),
+    'sync_state 실패목록 조회'
+  );
+  if (!row?.value) return [];
+  try {
+    const keys = JSON.parse(row.value);
+    return Array.isArray(keys) ? keys : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setFailedItemKeys(keys) {
+  const { id: userId } = requireUser();
+  unwrap(
+    await supabase
+      .from(SYNC_STATE)
+      .upsert(
+        { user_id: userId, key: 'failedItemKeys', value: JSON.stringify(keys ?? []) },
+        { onConflict: 'user_id,key' }
+      ),
+    'sync_state 실패목록 저장'
+  );
+}
+
 // --- papers ------------------------------------------------------------
 
 export async function savePaper({

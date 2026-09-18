@@ -12,6 +12,7 @@
   let selected = $state(null); // { key, name }
   let papers = $state([]);
   let papersLoading = $state(false);
+  let requestId = 0;
 
   async function load() {
     loading = true;
@@ -26,12 +27,16 @@
   }
 
   async function selectCollection(c) {
+    const currentRequest = ++requestId;
     selected = c;
     papersLoading = true;
     try {
-      papers = await api.listCollectionPapers(c.key);
+      const result = await api.listCollectionPapers(c.key);
+      // 응답이 왔을 때 여전히 가장 최근에 선택한 컬렉션에 대한 것일 때만 반영한다
+      // — 빠르게 A→B를 연달아 누르면 늦게 온 A 응답이 B를 덮어쓰는 걸 막는다.
+      if (currentRequest === requestId) papers = result;
     } finally {
-      papersLoading = false;
+      if (currentRequest === requestId) papersLoading = false;
     }
   }
 

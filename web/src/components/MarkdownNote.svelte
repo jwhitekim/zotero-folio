@@ -125,12 +125,21 @@
     saveInFlight = true;
     saveState = 'saving';
     saveError = '';
+    // 저장을 시작하는 시점의 내용을 캡처한다. 저장이 끝날 때 판정/초안 정리는
+    // 이 스냅샷을 기준으로 해야 한다 — 저장 도중 사용자가 계속 입력해서
+    // markdown이 더 바뀌면, 실제 서버에 저장된 건 snapshot이지 최신 markdown이
+    // 아니기 때문. 최신 기준으로 clearDraft()하면 아직 저장 안 된 초안이 사라진다.
+    const snapshot = markdown;
     try {
-      await onSave(markdown);
-      hasPersisted = markdown.trim() !== '';
+      await onSave(snapshot);
+      hasPersisted = snapshot.trim() !== '';
       saveState = 'saved';
       savedAt = new Date();
-      clearDraft();
+      // 저장 완료 시점에도 내용이 그대로일 때만 초안을 지운다. 저장 도중
+      // 내용이 달라졌으면 초안을 남겨 다음 자동저장 사이클이 마저 저장하게 둔다.
+      if (markdown === snapshot) {
+        clearDraft();
+      }
     } catch (err) {
       saveState = 'error';
       saveError = err.message;
