@@ -12,6 +12,7 @@ CLAUDE.md에 다 담기엔 긴 내용을 옮겨둔 곳입니다.
 | [changelog.md](changelog.md) | git 로그를 주제별로 재구성한 전체 개발 기록 |
 | [overview/stack-choice-and-scaling.md](overview/stack-choice-and-scaling.md) | Node.js+Svelte 스택 채택 근거, 향후 대규모 사용자 대응 시 확장 로드맵 |
 | [overview/scope-discipline-notes.md](overview/scope-discipline-notes.md) | 프로젝트 규모와 개인 검증 능력 사이 격차, 범위를 좁게 유지하는 원칙과 확인이 필요한 변경 신호 |
+| [overview/release-feasibility.md](overview/release-feasibility.md) | 윈도우 데스크톱 앱화 가능성 탐색 — 패키징 방식 비교, 서버 리소스 관점, 배포 전 확인 사항 |
 
 ## PDF 뷰어 ([pdf/](pdf/))
 
