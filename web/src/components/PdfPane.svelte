@@ -14,7 +14,10 @@
   // 타입이든 확대/축소가 똑같이 동작한다.
   // itemKey는 PDF 하이라이트(형광펜)를 Zotero에 읽고 쓸 때만 쓴다 — HTML
   // 스냅샷에는 하이라이트 개념이 없어서 HtmlViewer로는 내려보내지 않는다.
-  let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse } = $props();
+  // onBack/backLabel/paperTitle: 예전엔 PaperDetailSplit.svelte의 별도
+  // reader-topbar 헤더가 뒤로가기/원문 새 창 열기를 담당했으나, 그 헤더를
+  // 없애면서 원문 툴바(이 컴포넌트)로 옮겨왔다.
+  let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse, onBack, backLabel, paperTitle } = $props();
 
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
@@ -143,7 +146,20 @@
 
 <section class="split-pdf-pane" aria-label="원문">
   <div class="viewer-toolbar">
-    <div><span class="toolbar-icon"><Icon name="file" size={17} /></span><strong>원문</strong></div>
+    <div class="viewer-toolbar-left">
+      <button class="reader-back" onclick={onBack}>
+        <Icon name="arrow-left" size={18} />
+        <span>{backLabel}</span>
+      </button>
+      {#if attachmentType}
+        <a class="reader-title" href={contentUrl} target="_blank" rel="noopener" title="새 창에서 원문 열기">
+          <span class="reader-title-text">{paperTitle}</span>
+          <Icon name="external" size={13} />
+        </a>
+      {:else}
+        <p class="reader-title">{paperTitle}</p>
+      {/if}
+    </div>
     {#if attachmentType}
       <div class="pdf-zoom-controls" aria-label="원문 확대 및 축소">
         <button onclick={() => changeZoom(-0.15)} disabled={pdfZoom <= MIN_ZOOM} aria-label="원문 축소">−</button>

@@ -1345,20 +1345,6 @@ textarea::placeholder {
   background: var(--surface);
 }
 
-.reader-topbar {
-  position: relative;
-  z-index: 5;
-  display: grid;
-  height: 64px;
-  padding: 0 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr);
-  align-items: center;
-}
-
 .reader-back {
   display: inline-flex;
   width: fit-content;
@@ -1376,32 +1362,6 @@ textarea::placeholder {
 .reader-back:hover {
   background: var(--surface-subtle);
   color: var(--accent);
-}
-
-.reader-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  color: var(--text);
-  font-size: 0.8rem;
-}
-
-.reader-brand strong {
-  color: var(--accent);
-  font-family: var(--font-serif);
-  font-size: 0.95rem;
-  letter-spacing: -0.02em;
-}
-
-.reader-brand span {
-  width: 1px;
-  height: 12px;
-  background: var(--border-strong);
-}
-
-.reader-brand em {
-  color: var(--text-muted);
-  font-style: normal;
 }
 
 .reader-title {
@@ -1446,7 +1406,7 @@ a.reader-title svg {
 .split-view {
   display: grid;
   width: 100%;
-  height: calc(100dvh - 64px);
+  height: 100dvh;
   overflow: hidden;
   /* --split-note-width는 PaperDetailSplit.svelte가 구분선 드래그로 인라인
      설정한다. 기본값(420px)은 노트 패널을 렌더링해본 적 없는 첫 로드
@@ -1517,6 +1477,22 @@ a.reader-title svg {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+}
+
+.viewer-toolbar-left .reader-back {
+  flex: 0 0 auto;
+}
+
+/* reader-topbar의 3열 그리드(제목이 오른쪽 끝 정렬)에 맞춰져 있던 스타일을
+   툴바 왼쪽 묶음(뒤로가기 옆) 맥락에 맞게 왼쪽 정렬로 뒤집는다. */
+.viewer-toolbar-left .reader-title {
+  min-width: 0;
+  text-align: left;
+}
+
+.viewer-toolbar-left a.reader-title {
+  justify-content: flex-start;
 }
 
 .viewer-toolbar > :last-child {
@@ -1797,12 +1773,6 @@ a.reader-title svg {
    하단에서 끌어올린다 — 탭 전환/분할 노트 패널은 여기서 렌더하지 않는다.
    조건 자체는 PaperDetailSplit의 matchMedia와 동일하게 맞춘다. */
 @media (max-width: 900px), (orientation: portrait) and (max-width: 1024px) {
-  .reader-topbar {
-    height: 56px;
-    padding: 0 0.75rem;
-    grid-template-columns: 1fr auto 1fr;
-  }
-
   p.reader-title {
     display: none;
   }
@@ -1819,9 +1789,9 @@ a.reader-title svg {
   }
 
   /* 모바일에서는 노트 패널/리사이저를 렌더하지 않으므로(바텀시트가 대체)
-     원문 패널이 화면(상단바 56px 제외)을 세로로 꽉 채운다. */
+     원문 패널이 화면을 세로로 꽉 채운다. */
   .split-view.mobile {
-    height: calc(100dvh - 56px);
+    height: 100dvh;
     grid-template-columns: 1fr;
   }
 

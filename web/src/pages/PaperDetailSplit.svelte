@@ -80,24 +80,6 @@
 </script>
 
 <div class="reader-shell">
-  <header class="reader-topbar">
-    <button class="reader-back" onclick={onBack}>
-      <Icon name="arrow-left" size={18} />
-      <span>{backLabel}</span>
-    </button>
-    <div class="reader-brand"><strong>Folio</strong><span></span><em>읽기</em></div>
-    {#if paper}
-      {#if paper.attachmentType}
-        <a class="reader-title" href={`/api/papers/${itemKey}/${paper.attachmentType}`} target="_blank" rel="noopener" title="새 창에서 원문 열기">
-          <span class="reader-title-text">{paper.title}</span>
-          <Icon name="external" size={13} />
-        </a>
-      {:else}
-        <p class="reader-title">{paper.title}</p>
-      {/if}
-    {/if}
-  </header>
-
   {#if loading}
     <div class="reader-loading"><div class="skeleton-detail"><div></div><span></span><span></span><span></span></div></div>
   {:else if error}
@@ -117,6 +99,9 @@
         {itemKey}
         {noteCollapsed}
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
+        {onBack}
+        {backLabel}
+        paperTitle={paper.title}
       />
 
       {#if !isMobile}
