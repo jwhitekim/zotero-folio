@@ -1040,19 +1040,31 @@
   }
 
   // 하이라이트 목록이 바뀌면 현재 렌더된 페이지들의 레이어를 다시 그린다.
-  // (zoom/renderedZoom도 함께 읽히므로 확대 중에도 좌표가 따라온다)
+  // (zoom/renderedZoom도 함께 읽히므로 확대가 확정된 뒤엔 좌표가 따라온다)
+  //
+  // 핀치 미리보기 중(zoom !== renderedZoom)에는 다시 그리지 않는다 — 레이어는
+  // .pdfViewer의 자식이라 미리보기 transform: scale이 캔버스와 똑같은 비율로
+  // 함께 확대해주므로, 매 프레임 다시 그려도 결과 모양은 동일하다. 오히려 매
+  // 프레임 visualScale(getBoundingClientRect 읽기) → replaceChildren(쓰기)가
+  // 페이지마다 반복되며 강제 동기 레이아웃이 일어나고, 그 DOM 쓰기가 합성된
+  // .pdfViewer 레이어를 매 프레임 통째로 리페인트하게 만들어 태블릿 핀치가
+  // 버벅였다. 확정 재렌더(commitScale → pagerendered)가 끝나면 그때 정확한
+  // 배율로 다시 그린다.
   $effect(() => {
     highlights;
     zoom;
     renderedZoom;
+    if (zoom !== renderedZoom) return;
     renderAllHighlightLayers();
   });
 
-  // 필기 목록/배율이 바뀌면 필기 레이어도 다시 그린다.
+  // 필기 목록/배율이 바뀌면 필기 레이어도 다시 그린다(위와 같은 이유로
+  // 핀치 미리보기 중에는 건너뛴다).
   $effect(() => {
     inks;
     zoom;
     renderedZoom;
+    if (zoom !== renderedZoom) return;
     renderAllInkLayers();
   });
 
@@ -1633,7 +1645,11 @@
      에서 텍스트 선택 하이라이트가 캔버스 글자와 미세하게 어긋나는 걸 키우는
      원인으로 의심된다. 공식 pdf.js 데모 뷰어엔 이런 상시 transform 래퍼가
      없어서 같은 문제가 덜 보인다 — 그래서 휴지 상태에선 우리도 transform을
-     완전히 없애 그 데모와 같은 조건으로 맞춘다. -->
+     완전히 없애 그 데모와 같은 조건으로 맞춘다.
+     transform이 걸리는 미리보기 구간에만 will-change: transform도 함께 켜서,
+     핀치가 진행되는 동안 브라우저가 이 레이어를 GPU 합성 상태로 안정적으로
+     유지하게 힌트를 준다(휴지 상태에선 transform과 같이 없애 상시 레이어
+     승격을 남기지 않는다). -->
 <div
   class="pdfViewer"
   class:pen-mode={penMode}
@@ -1641,6 +1657,7 @@
   class:highlighter-mode={highlighterPenMode}
   bind:this={viewerEl}
   style:transform={zoom === renderedZoom ? undefined : `scale(${zoom / renderedZoom})`}
+  style:will-change={zoom === renderedZoom ? undefined : 'transform'}
 ></div>
 
 <!-- 그리는 중인 스트로크의 실시간 미리보기. 화면(client) 좌표로 그리므로 뷰포트

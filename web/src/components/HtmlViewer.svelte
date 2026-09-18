@@ -229,6 +229,13 @@
     top: 0;
     left: 0;
     transform-origin: 0 0;
+    /* 이 래퍼는 항상 transform: scale이 걸려 있어(폭 맞춤 × zoom) 이미 합성
+       레이어다. 핀치 중엔 그 scale이 매 프레임 바뀌는데, will-change로 GPU
+       합성 상태를 명시해두면 브라우저가 안쪽 iframe 래스터를 캐시한 채
+       recomposite만 하게 되어(매 프레임 리페인트 방지) 태블릿 핀치가
+       부드러워진다. PDF 쪽은 휴지 시 transform을 없애는 구조라 미리보기
+       구간에만 켜지만, 여기선 transform이 상시라 CSS에 그대로 둔다. */
+    will-change: transform;
   }
 
   .html-snapshot-frame {
