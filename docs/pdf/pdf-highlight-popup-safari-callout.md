@@ -80,4 +80,4 @@ Look Up/Share/Search Web 등 콜아웃의 다른 기능은 거의 안 쓰고 복
 ## 관련 문서
 
 - [pdf-highlight-popup.md](pdf-highlight-popup.md)
-- [tablet-touch-ux-ideas.md](tablet-touch-ux-ideas.md)
+- [tablet-touch-ux-ideas.md](../touch/tablet-touch-ux-ideas.md)

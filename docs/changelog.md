@@ -21,7 +21,7 @@
 - Ctrl/Cmd+스크롤 확대/축소, 커서 위치 앵커링, 스크롤 위치 유지를
   반복적으로 다듬음(`f797dc0`, `1cdf9d4`, `79f6eb5`, `39a8cf6`,
   `815023a`) — 여러 차례 재시도가 필요했던 영역. 설계 배경과 실패했던
-  접근은 [pdf-zoom.md](pdf-zoom.md)에 정리.
+  접근은 [pdf-zoom.md](pdf/pdf-zoom.md)에 정리.
 - 참고문헌/각주 링크 내부 점프, 텍스트 선택이 주석 레이어에 막히던
   문제 수정(`34420f0`, `50f5181`, `6695622`).
 - 원문/노트 패널 분할 뷰, 노트 사이드바 접기 토글 도입(`7c7e4b0`).
@@ -64,7 +64,7 @@
 - Windows fractional 디스플레이 배율에서 PDF 텍스트 선택이 어긋나는
   문제를 3차례에 걸쳐 조사·수정(`2a06022`, `cce58f4`, `6fd9f8c` 순서로,
   이후 09-06 `cd02300`) — 가설 배제 과정과 최종 해결 방식은
-  [pdf-text-selection-alignment.md](pdf-text-selection-alignment.md)에
+  [pdf-text-selection-alignment.md](pdf/pdf-text-selection-alignment.md)에
   기록.
 
 ## 6단계 — 마무리 정리 (2026-09-06)
@@ -87,7 +87,7 @@
 
 - 하이라이트 팝업을 애니메이션과 위험 강조(삭제) 스타일로 재작업,
   트랜지션 중 잔류 버그 수정(`def52ef`, `853fbf4`) — 과정 기록은
-  [pdf-highlight-popup.md](pdf-highlight-popup.md).
+  [pdf-highlight-popup.md](pdf/pdf-highlight-popup.md).
 - 맥 환경에서 참고문헌 점프 후 Option+Left가 반응하지 않던 버그 수정
   — 원인은 클릭된 링크에 남은 포커스가 브라우저의 키 이벤트 자체를
   가로채는 것(`17dc93f`).
@@ -99,9 +99,9 @@
   ([product-spec.md](overview/product-spec.md), `b7d0416`), `docs/` 안내 문서
   추가(`0d2dfaf`).
 - 태블릿/모바일 터치 UX 논의(핀치 확대, ink 필기, 추가 디자인 방향)
-  — [tablet-touch-ux-ideas.md](tablet-touch-ux-ideas.md).
+  — [tablet-touch-ux-ideas.md](touch/tablet-touch-ux-ideas.md).
 - Zotero ink annotation 데이터 형식 조사
-  — [pdf-ink-annotation-research.md](pdf-ink-annotation-research.md).
+  — [pdf-ink-annotation-research.md](pdf/pdf-ink-annotation-research.md).
 
 ## 관련 문서
 

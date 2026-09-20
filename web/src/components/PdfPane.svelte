@@ -19,6 +19,12 @@
   // 없애면서 원문 툴바(이 컴포넌트)로 옮겨왔다.
   let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse, onBack, backLabel, paperTitle } = $props();
 
+  // 2026-09-19: GoodNotes로 필기하고 Zotero 첨부파일을 교체·동기화하는
+  // 방식으로 결정 — 이 도구의 커스텀 필기(펜/형광펜/지우개)는 당분간
+  // 툴바에서만 숨긴다. 로직/서버 라우트는 그대로 두고 나중에 다시 켤 수
+  // 있게 이 상수 하나만 바꾸면 되게 한다.
+  const SHOW_DRAWING_TOOLS = false;
+
   let pdfZoom = $state(1);
   let pdfScrollEl = $state();
 
@@ -174,7 +180,7 @@
       <span></span>
     {/if}
     <div class="viewer-toolbar-right">
-      {#if attachmentType === 'pdf'}
+      {#if attachmentType === 'pdf' && SHOW_DRAWING_TOOLS}
         <!-- 펜(필기) 토글. 켜면 드래그가 자유 드로잉이 된다. 켜져 있을 때만
              굵기 선택(얇음/보통/굵음)을 옆에 펼친다 — 형광펜 팝업과 같은 시각 톤. -->
         {#if penMode}

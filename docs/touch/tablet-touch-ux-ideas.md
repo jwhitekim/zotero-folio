@@ -37,7 +37,7 @@ TODO.md에 등록 후 진행.
 ### 실현 가능성 — 가능하지만 하이라이트보다 범위 큼
 
 Zotero가 `ink` annotation 타입을 네이티브로 지원(형식 조사는
-[pdf-ink-annotation-research.md](pdf-ink-annotation-research.md) 참고) —
+[pdf-ink-annotation-research.md](../pdf/pdf-ink-annotation-research.md) 참고) —
 완전히 새로운 설계가 아니라 하이라이트 기능과 같은 패턴의 확장.
 
 추가로 필요한 작업:
@@ -80,6 +80,6 @@ Zotero가 `ink` annotation 타입을 네이티브로 지원(형식 조사는
 
 ## 관련 문서
 
-- [pdf-ink-annotation-research.md](pdf-ink-annotation-research.md)
-- [pdf-highlight-popup.md](pdf-highlight-popup.md)
+- [pdf-ink-annotation-research.md](../pdf/pdf-ink-annotation-research.md)
+- [pdf-highlight-popup.md](../pdf/pdf-highlight-popup.md)
 - [product-spec.md](../overview/product-spec.md)

@@ -68,5 +68,5 @@ Zotero Web API(`GET /users/<id>/items?itemType=annotation`)로 해당
 
 - [pdf-highlight-popup.md](pdf-highlight-popup.md) — 먼저 구현된 하이라이트
   기능(같은 annotation 패턴의 선례).
-- [tablet-touch-ux-ideas.md](tablet-touch-ux-ideas.md) — ink 기능이 나온
+- [tablet-touch-ux-ideas.md](../touch/tablet-touch-ux-ideas.md) — ink 기능이 나온
   배경 논의 전체.
