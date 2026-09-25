@@ -44,7 +44,19 @@ capability를 가로지르는 기술 결정만 기록. capability 하나에만
 
 - AI 생성 요약/태그 — `contract.md`에서 폐기 확정.
 - 커스텀 필기(펜/형광펜) 고도화 — GoodNotes로 대체 결정, 코드는 유지한
-  채 UI에서만 숨김(`PdfPane.svelte`의 `SHOW_DRAWING_TOOLS`).
+  채 UI에서만 숨김(`PdfPane.svelte`의 `SHOW_DRAWING_TOOLS`). GoodNotes로
+  필기한 PDF를 되돌려 올리는 작업은 이제 Folio 웹에서 직접 첨부파일을
+  교체할 수 있다(아래) — Zotero 데스크톱 앱의 수동 교체가 필요 없다.
+
+## 첨부파일 교체 (읽기 전용 원칙의 명시적 예외)
+
+`zotero.js`는 원칙적으로 서지정보·첨부파일 아이템을 건드리지 않지만, 기존
+첨부파일(PDF/HTML 스냅샷)의 "파일 바이너리"만 새 파일로 교체하는 것은 예외로
+허용한다(`replaceAttachmentFile`, `POST /api/papers/:key/attachment`). Zotero
+Web API의 3단계 업로드(인증→S3 업로드→등록)를 따르고, 기존 파일 md5로 If-Match를
+걸어 그새 다른 곳에서 바뀐 경우(412)엔 덮어쓰지 않는다. HTML은 스냅샷 zip 포맷과
+호환되도록 서버가 plain html을 zip으로 감싼다. 되돌릴 수 없는 작업이라 웹 UI는
+업로드 전 확인 다이얼로그를 반드시 거친다.
 - `visualViewport` 기반 전면 네이티브 핀치 — 분할뷰(원문+메모 패널)
   레이아웃이 함께 확대되며 깨지는 문제, `docs/notes/touch/mobile-scroll-zoom-reference.md`
   참고.

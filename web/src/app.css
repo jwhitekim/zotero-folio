@@ -1660,6 +1660,44 @@ a.reader-title svg {
   outline-offset: 0;
 }
 
+/* 첨부파일 교체 버튼 — 노트 접기 토글과 같은 톤. 업로드 중에는 "업로드 중…"
+   텍스트라 폭이 늘어나므로 고정 폭을 강제하지 않는다. */
+.attachment-replace-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 0.5rem;
+  place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.attachment-replace-toggle:hover:not(:disabled) {
+  background: var(--accent-pale);
+  color: var(--accent);
+}
+
+.attachment-replace-toggle:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.attachment-uploading {
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.attachment-error {
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  background: var(--danger-pale, #fdecec);
+  color: var(--danger, #c0392b);
+  font-size: 0.75rem;
+}
+
 .viewer-toolbar a {
   padding: 0.35rem 0.5rem;
   border-radius: 8px;

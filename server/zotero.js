@@ -2,10 +2,15 @@
 // 읽기: 변경된 아이템 조회(버전 기반 증분), 자식 아이템/컬렉션 조회, PDF 다운로드,
 //       PDF 첨부의 annotation(하이라이트) 조회
 // 쓰기: note 생성/수정과 annotation(하이라이트) 생성/삭제만 지원한다. 원본
-//       아이템의 title/author/PDF 등 서지정보 필드를 수정하는 함수는 의도적으로
+//       아이템의 title/author 등 서지정보 필드를 수정하는 함수는 의도적으로
 //       만들지 않는다 (CLAUDE.md 제약). 단, 이 도구가 직접 만든 메모 note(태그로
 //       식별)는 생성/수정 둘 다 한다. 하이라이트도 "새 아이템 생성"이라
 //       첨부파일 아이템 자체는 건드리지 않는다.
+//       예외 — replaceAttachmentFile: 기존 첨부파일(PDF/HTML 스냅샷)의 "파일
+//       바이너리"만 새 파일로 교체한다(주로 GoodNotes로 필기한 PDF를 되돌려
+//       올리는 워크플로우, docs/design.md 참고). 서지정보 필드나 첨부 아이템의
+//       메타데이터 구조는 그대로 두고 파일 내용만 덮어쓰는, 명시적으로 승인된
+//       유일한 쓰기 예외다.
 
 import crypto from 'node:crypto';
 import { requireUser } from './context.js';
@@ -156,6 +161,84 @@ export async function downloadAttachmentFile(attachmentKey) {
   }
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+// 기존 첨부파일의 파일 바이너리를 새 파일로 교체한다. Zotero Web API의 3단계
+// 업로드 플로우를 따른다:
+//   (1) POST .../file  — md5/filename/filesize/mtime을 보내 업로드를 인증받는다.
+//       기존 파일을 덮어쓰는 것이므로 현재 파일의 md5로 If-Match를 건다(파일이
+//       아직 없으면 If-None-Match: *). 서버가 If-Match 불일치(412)를 돌려주면
+//       그새 다른 데서 파일이 바뀐 것이므로 덮어쓰지 않고 실패시킨다.
+//   (2) 반환된 S3 URL로 prefix+파일+suffix를 실제 업로드한다.
+//   (3) 다시 POST .../file 에 upload=<uploadKey>로 등록을 완료한다(같은 If-Match).
+// 이미 동일한 파일이면 (1)에서 {exists:1}이 돌아오고, 그대로 성공 처리한다.
+// fileBuffer는 최종적으로 Zotero에 올라갈 바이트 그대로여야 한다(HTML 스냅샷을
+// zip으로 감싸는 등의 가공은 호출부에서 끝낸 뒤 넘긴다).
+export async function replaceAttachmentFile(attachmentKey, fileBuffer) {
+  const attachment = await fetchItem(attachmentKey);
+  if (attachment.data.itemType !== 'attachment') {
+    throw new Error('첨부파일 아이템이 아닙니다');
+  }
+  const { md5: oldMd5, filename } = attachment.data;
+  if (!filename) {
+    throw new Error('파일명이 없는 첨부(링크 첨부 등)는 교체할 수 없습니다');
+  }
+
+  const md5 = crypto.createHash('md5').update(fileBuffer).digest('hex');
+  const mtime = Date.now();
+  // 기존 파일이 있으면 그 md5로 낙관적 잠금, 없으면 "파일 없음"을 명시(If-None-Match: *).
+  const precondition = oldMd5 ? { 'If-Match': oldMd5 } : { 'If-None-Match': '*' };
+  const fileUrl = `${userPrefix()}/items/${attachmentKey}/file`;
+
+  // (1) 업로드 인증 요청.
+  const authRes = await fetch(fileUrl, {
+    method: 'POST',
+    headers: { ...headers(precondition), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      md5,
+      filename,
+      filesize: String(fileBuffer.length),
+      mtime: String(mtime),
+    }),
+  });
+  if (authRes.status === 412) {
+    throw new Error('첨부파일이 그새 다른 곳에서 변경되었습니다 (동기화 후 다시 시도해주세요)');
+  }
+  if (!authRes.ok) {
+    throw new Error(`Zotero 업로드 인증 실패: ${authRes.status} ${authRes.statusText}`);
+  }
+  const auth = await authRes.json();
+
+  // 이미 같은 파일이면 Zotero가 업로드를 건너뛰라고 알려준다.
+  if (auth.exists) return;
+
+  // (2) 실제 파일 업로드 — prefix/suffix 사이에 파일 바이트를 끼워 보낸다.
+  const uploadBody = Buffer.concat([
+    Buffer.from(auth.prefix, 'utf8'),
+    fileBuffer,
+    Buffer.from(auth.suffix, 'utf8'),
+  ]);
+  const uploadRes = await fetch(auth.url, {
+    method: 'POST',
+    headers: { 'Content-Type': auth.contentType },
+    body: uploadBody,
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`Zotero 파일 업로드 실패: ${uploadRes.status} ${uploadRes.statusText}`);
+  }
+
+  // (3) 업로드 등록 완료 — (1)과 같은 precondition을 다시 건다.
+  const registerRes = await fetch(fileUrl, {
+    method: 'POST',
+    headers: { ...headers(precondition), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ upload: auth.uploadKey }),
+  });
+  if (registerRes.status === 412) {
+    throw new Error('첨부파일이 그새 다른 곳에서 변경되었습니다 (동기화 후 다시 시도해주세요)');
+  }
+  if (!registerRes.ok) {
+    throw new Error(`Zotero 업로드 등록 실패: ${registerRes.status} ${registerRes.statusText}`);
+  }
 }
 
 // PDF 첨부파일에 달린 annotation 아이템을 전부 가져온다 (하이라이트 렌더링용).

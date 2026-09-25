@@ -14,6 +14,9 @@
   let loading = $state(true);
   let error = $state('');
   let noteCollapsed = $state(false);
+  // 첨부파일 교체 후 뷰어가 새 파일을 다시 불러오게 하는 캐시버스터.
+  // contentUrl 쿼리에 붙여서 값이 바뀌면 PdfViewer/HtmlViewer가 재요청한다.
+  let attachmentReloadToken = $state(0);
 
   // 모바일(폰 + 세로모드 태블릿) 판정. 이 조건에서만 노트를 바텀시트로
   // 띄우고, 분할뷰의 노트 패널/리사이저는 렌더하지 않는다. 데스크톱/가로
@@ -95,10 +98,13 @@
     >
       <PdfPane
         attachmentType={paper.attachmentType}
-        contentUrl={paper.attachmentType ? `/api/papers/${itemKey}/${paper.attachmentType}` : null}
+        contentUrl={paper.attachmentType
+          ? `/api/papers/${itemKey}/${paper.attachmentType}${attachmentReloadToken ? `?v=${attachmentReloadToken}` : ''}`
+          : null}
         {itemKey}
         {noteCollapsed}
         onToggleNoteCollapse={() => (noteCollapsed = !noteCollapsed)}
+        onAttachmentReplaced={() => (attachmentReloadToken += 1)}
         {onBack}
         {backLabel}
         paperTitle={paper.title}

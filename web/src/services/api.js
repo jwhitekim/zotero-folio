@@ -31,6 +31,13 @@ export const api = {
   getPaper: (key) => request(`/api/papers/${key}`),
   deletePaper: (key) => request(`/api/papers/${key}`, { method: 'DELETE' }),
   addWebpage: (url) => request('/api/papers/webpage', { method: 'POST', ...jsonBody({ url }) }),
+  // 기존 첨부파일(PDF/HTML 스냅샷)의 파일 내용을 새 파일로 교체한다.
+  // multipart/form-data라 Content-Type은 브라우저가 boundary와 함께 자동 지정하게 둔다.
+  replaceAttachment: (key, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request(`/api/papers/${key}/attachment`, { method: 'POST', body: form });
+  },
   saveMemo: (key, markdown) =>
     request(`/api/papers/${key}/memo`, { method: 'PUT', ...jsonBody({ markdown }) }),
 

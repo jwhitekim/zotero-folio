@@ -16,6 +16,7 @@ import dns from 'node:dns';
 import net from 'node:net';
 import express from 'express';
 import session from 'express-session';
+import multer from 'multer';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { marked } from 'marked';
@@ -48,6 +49,7 @@ import {
   deleteItem,
   listCollections,
   downloadAttachmentFile,
+  replaceAttachmentFile,
   fetchAttachmentAnnotations,
   createHighlightAnnotation,
   createInkAnnotation,
@@ -56,6 +58,14 @@ import { getRequestToken, buildAuthorizeUrl, getAccessToken } from './oauth1.js'
 
 const app = express();
 app.use(express.json());
+
+// 첨부파일 교체 업로드용 — 파일을 메모리에 받아 그대로 Zotero로 올린다(디스크에
+// 남기지 않음). GoodNotes로 필기한 PDF가 커질 수 있어 상한을 넉넉히 잡는다.
+const ATTACHMENT_MAX_BYTES = 200 * 1024 * 1024; // 200MB
+const attachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: ATTACHMENT_MAX_BYTES },
+});
 
 const PORT = process.env.PORT || 3002;
 const WEB_DIST = path.join(process.cwd(), 'web', 'dist');
@@ -642,6 +652,52 @@ function extractHtmlFromZip(buffer) {
   if (!entry) throw new Error('스냅샷 안에서 html 파일을 찾지 못했습니다');
   return entry.getData();
 }
+
+// plain .html 한 장을 Zotero 스냅샷과 호환되는 zip으로 감싼다. 서빙 쪽
+// extractHtmlFromZip이 확장자로 html 엔트리를 찾으므로 엔트리명은 index.html로 둔다.
+function wrapHtmlInZip(htmlBuffer) {
+  const zip = new AdmZip();
+  zip.addFile('index.html', htmlBuffer);
+  return zip.toBuffer();
+}
+
+// 기존 첨부파일(PDF 또는 HTML 스냅샷)의 파일 내용을 새 파일로 교체한다.
+// 되돌릴 수 없이 사용자의 Zotero 라이브러리 파일을 덮어쓰는 작업이라, 클라이언트
+// 확인 다이얼로그(web)와 별개로 서버도 (1) 논문/첨부 존재, (2) 업로드된 파일이
+// 기존 첨부 타입과 맞는지(PDF는 %PDF 매직, HTML은 zip으로 래핑)를 검사한다.
+// 서지정보 필드는 건드리지 않고 파일 바이너리만 바꾼다.
+app.post('/api/papers/:key/attachment', attachmentUpload.single('file'), async (req, res) => {
+  try {
+    const paper = await getPaper(req.params.key);
+    if (!paper) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
+    if (!paper.attachmentKey || !paper.attachmentType) {
+      return res.status(404).json({ error: '교체할 첨부파일이 없습니다' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: '업로드할 파일이 없습니다' });
+    }
+
+    let buffer = req.file.buffer;
+    if (paper.attachmentType === 'pdf') {
+      if (buffer.slice(0, 5).toString('ascii') !== '%PDF-') {
+        return res.status(400).json({ error: 'PDF 파일이 아닙니다 (PDF 첨부는 PDF로만 교체할 수 있어요)' });
+      }
+    } else if (paper.attachmentType === 'html') {
+      // 이미 zip(PK 매직)이면 그대로, plain html이면 스냅샷 zip으로 감싼다.
+      if (buffer.slice(0, 2).toString('ascii') !== 'PK') {
+        buffer = wrapHtmlInZip(buffer);
+      }
+    } else {
+      return res.status(400).json({ error: '교체를 지원하지 않는 첨부 타입입니다' });
+    }
+
+    await replaceAttachmentFile(paper.attachmentKey, buffer);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[papers attachment] 교체 실패:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- 하이라이트(형광펜) --------------------------------------------------
 // Zotero 표준 annotation 아이템(annotationType: highlight)으로만 저장한다.

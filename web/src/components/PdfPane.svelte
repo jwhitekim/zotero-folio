@@ -6,6 +6,7 @@
   import Icon from './Icon.svelte';
   import { createTouchGestures } from '../utils/touch-gestures.js';
   import { INK_WIDTHS, HIGHLIGHTER_WIDTHS } from '../utils/pdf-ink.js';
+  import { api } from '../services/api.js';
 
   // attachmentType: 'pdf' | 'html' | null. PDF면 pdf.js 엔진(PdfViewer)으로
   // 렌더링하고, HTML(브라우저 커넥터가 저장한 웹페이지 스냅샷)이면 HtmlViewer가
@@ -17,7 +18,45 @@
   // onBack/backLabel/paperTitle: 예전엔 PaperDetailSplit.svelte의 별도
   // reader-topbar 헤더가 뒤로가기/원문 새 창 열기를 담당했으나, 그 헤더를
   // 없애면서 원문 툴바(이 컴포넌트)로 옮겨왔다.
-  let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse, onBack, backLabel, paperTitle } = $props();
+  // onAttachmentReplaced: 첨부파일 교체가 성공하면 부모(PaperDetailSplit)가
+  // contentUrl에 캐시버스터를 붙여 뷰어를 새 파일로 다시 불러오게 한다.
+  let { attachmentType, contentUrl, itemKey, noteCollapsed, onToggleNoteCollapse, onBack, backLabel, paperTitle, onAttachmentReplaced } = $props();
+
+  // --- 첨부파일 교체 ------------------------------------------------------
+  // 되돌릴 수 없이 Zotero 원본 파일을 덮어쓰므로 반드시 확인 다이얼로그를 거친다.
+  let fileInputEl = $state();
+  let uploading = $state(false);
+  let uploadError = $state('');
+
+  function askReplace() {
+    uploadError = '';
+    fileInputEl?.click();
+  }
+
+  async function onFilePicked(e) {
+    const file = e.target.files?.[0];
+    // 같은 파일을 다시 골라도 change가 다시 발생하도록 값을 비워둔다.
+    e.target.value = '';
+    if (!file) return;
+
+    const kind = attachmentType === 'pdf' ? 'PDF' : 'HTML 스냅샷';
+    if (!confirm(`기존 ${kind} 첨부파일을 되돌릴 수 없이 새 파일로 덮어씁니다.\n계속하시겠습니까?`)) {
+      return;
+    }
+
+    uploading = true;
+    uploadError = '';
+    try {
+      await api.replaceAttachment(itemKey, file);
+      onAttachmentReplaced?.();
+    } catch (err) {
+      uploadError = err.message;
+    } finally {
+      uploading = false;
+    }
+  }
+
+  const acceptType = $derived(attachmentType === 'pdf' ? 'application/pdf,.pdf' : 'text/html,.html,.htm');
 
   // 2026-09-19: GoodNotes로 필기하고 Zotero 첨부파일을 교체·동기화하는
   // 방식으로 결정 — 이 도구의 커스텀 필기(펜/형광펜/지우개)는 당분간
@@ -252,6 +291,30 @@
           <Icon name="eraser" size={16} />
         </button>
       {/if}
+      {#if attachmentType}
+        <!-- 첨부파일 교체 — 클릭하면 파일 선택창을 열고, 선택 후 확인
+             다이얼로그를 거쳐 Zotero 원본 파일을 덮어쓴다. -->
+        <input
+          type="file"
+          accept={acceptType}
+          bind:this={fileInputEl}
+          onchange={onFilePicked}
+          style="display:none"
+        />
+        <button
+          class="attachment-replace-toggle"
+          onclick={askReplace}
+          disabled={uploading}
+          aria-label="첨부파일 교체"
+          title="첨부파일 교체"
+        >
+          {#if uploading}
+            <span class="attachment-uploading">업로드 중…</span>
+          {:else}
+            <Icon name="upload" size={16} />
+          {/if}
+        </button>
+      {/if}
       <button
         class="note-collapse-toggle"
         onclick={onToggleNoteCollapse}
@@ -262,6 +325,9 @@
       </button>
     </div>
   </div>
+  {#if uploadError}
+    <p class="attachment-error" role="alert">첨부파일 교체 실패: {uploadError}</p>
+  {/if}
   {#if attachmentType === 'pdf'}
     <div class="viewer-scroll-wrap">
       <!-- svelte-ignore a11y_no_static_element_interactions -- 스크롤/핀치 확대를 받는 스크롤 컨테이너지 상호작용 위젯이 아니다 -->
