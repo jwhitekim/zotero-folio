@@ -666,7 +666,21 @@ function wrapHtmlInZip(htmlBuffer) {
 // 확인 다이얼로그(web)와 별개로 서버도 (1) 논문/첨부 존재, (2) 업로드된 파일이
 // 기존 첨부 타입과 맞는지(PDF는 %PDF 매직, HTML은 zip으로 래핑)를 검사한다.
 // 서지정보 필드는 건드리지 않고 파일 바이너리만 바꾼다.
-app.post('/api/papers/:key/attachment', attachmentUpload.single('file'), async (req, res) => {
+// multer는 멀티파트 바디를 스트림으로 비동기 파싱하는데, 이 과정에서
+// AsyncLocalStorage 기반 로그인 컨텍스트(runWithUser)가 끊겨 파싱이 끝난 뒤
+// 이어지는 핸들러에서 currentUser()가 null이 돼버린다. 파싱 전에 유저를
+// 붙잡아뒀다가 파싱이 끝나면 컨텍스트를 다시 심어준다.
+function withPreservedUserContext(middleware) {
+  return (req, res, next) => {
+    const user = currentUser();
+    middleware(req, res, (err) => {
+      if (err) return next(err);
+      runWithUser(user, next);
+    });
+  };
+}
+
+app.post('/api/papers/:key/attachment', withPreservedUserContext(attachmentUpload.single('file')), async (req, res) => {
   try {
     const paper = await getPaper(req.params.key);
     if (!paper) return res.status(404).json({ error: '논문을 찾을 수 없습니다' });
