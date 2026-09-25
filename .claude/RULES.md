@@ -1,6 +1,11 @@
-# CLAUDE.md
+# RULES.md
 
 이 파일은 Claude Code가 이 프로젝트에서 작업할 때 참고하는 컨텍스트입니다.
+(2026-09-22: 원래 파일명은 `CLAUDE.md`였고 그 이름이 Claude Code의 자동
+로드 관례라, 루트의 `AGENTS.md`(todo-guard 운영 규칙)와 이름이 겹쳐
+혼란을 주지 않도록 `RULES.md`로 바꿨다. 자동 로드가 이 이름에서도
+그대로 되는지는 다음 세션에서 직접 확인 필요 — 안 되면 세션 시작마다
+이 파일을 수동으로 읽게 안내하거나 이름을 되돌려야 한다.)
 
 ## 프로젝트 정체성
 
@@ -161,3 +166,9 @@ npm run build:web   # web 의존성 설치 + 빌드 (npm install 필요할 때)
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | 2026-08-28 | 초기 구성 (folio-builder, folio-verifier, folio-run-verify, folio-feature-team) | 전체 | 사용자 요청 — 기능 개발 워크플로 자동화 |
+
+## 문서 체계
+
+문서 배치는 `docs/docs-rules.md`를 따른다 — `docs/`는 SDD(contract/
+proposal/design/tasks/specs) 구조이고, SDD 도입 전 조사·결정 기록은
+`docs/notes/`에 있다.
