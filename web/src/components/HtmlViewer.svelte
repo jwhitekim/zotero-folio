@@ -198,7 +198,7 @@
     overscroll-behavior-x: contain;
     /* PDF 쪽(.viewer-scroll)과 같은 이유 — 팬·핀치를 모두 JS로 직접
        처리하므로 네이티브 터치 동작을 전부 끈다(pan-x pan-y로 팬만 네이티브에
-       맡기면 핀치 중 스크롤 경합이 생긴다, docs/touch/pdf-touch-pinch-zoom.md). */
+       맡기면 핀치 중 스크롤 경합이 생긴다, docs/notes/touch/pdf-touch-pinch-zoom.md). */
     touch-action: none;
     scrollbar-gutter: stable;
     scrollbar-color: var(--border-strong) transparent;

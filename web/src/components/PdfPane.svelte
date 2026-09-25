@@ -139,7 +139,7 @@
   // .viewer-scroll에는 touch-action: none(app.css)을 걸어 네이티브 팬/핀치를
   // 모두 끄고, 여기서 팬은 scrollTop 직접 갱신으로, 핀치는 기존 zoomTo로
   // 처리한다 — 네이티브와 JS가 스크롤 위치를 두고 경합하던 문제(방향 뒤집힘/
-  // 튐)를 없앤다(docs/touch/pdf-touch-pinch-zoom.md). 데스크탑 Ctrl/Cmd+휠 확대는
+  // 튐)를 없앤다(docs/notes/touch/pdf-touch-pinch-zoom.md). 데스크탑 Ctrl/Cmd+휠 확대는
   // 마우스 입력이라 무관하게 그대로 동작한다. PDF는 이 스크롤 요소 안에서
   // 바로 렌더되므로 여기 부모에 붙이면 된다(HTML 스냅샷은 iframe 안이라
   // HtmlViewer가 같은 헬퍼를 자기 iframe/스크롤 박스에 따로 단다).

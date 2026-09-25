@@ -6,7 +6,7 @@
 //   핀치만 우리 JS"로 절충했는데, 이 값은 스펙상 두 손가락 움직임도 팬으로
 //   해석해 브라우저가 스크롤 위치를 바꾼다. 그러면 같은 프레임에 우리 zoomTo가
 //   보정하는 scrollTop과 경합해 확대 방향이 뒤집히거나 위치가 튀었다
-//   (docs/touch/pdf-touch-pinch-zoom.md). 표준 권장대로 touch-action: none으로 모든
+//   (docs/notes/touch/pdf-touch-pinch-zoom.md). 표준 권장대로 touch-action: none으로 모든
 //   네이티브 터치 처리를 끄고, 팬·핀치를 여기서 전부 직접 구현해 경합을 없앤다.
 //
 // 확대 상태(zoom 값)와 그 반영/스크롤 보정(zoomTo)은 여전히 부모(PdfPane)가
