@@ -1771,6 +1771,16 @@ a.reader-title svg {
   text-align: center;
 }
 
+/* 로딩/에러 상태는 문서를 새로 불러오는 동안(재교체 후 재로드 등)에도
+   이미 렌더된 페이지 위에 겹쳐 보여준다 — 그 자리에 그대로 두면(문서
+   흐름 안) 내용을 아래로 밀어버린다. */
+.pdf-status {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--surface, #fff);
+}
+
 .pdf-status.error {
   color: var(--danger);
 }

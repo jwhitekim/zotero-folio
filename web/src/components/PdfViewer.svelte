@@ -1338,8 +1338,15 @@
     renderedZoom = zoom;
   }
 
+  // 같은 인스턴스에서 문서를 다시 불러올 때(첨부파일 교체 후 재로드 등)
+  // loadAndShow가 겹쳐 호출되면, 앞선 호출의 pagesinit이 뒤늦게 도착해
+  // 최신 호출의 loading=false를 다시 true로 되돌리는 레이스가 있었다.
+  // 매 호출에 세대 번호를 매겨 "가장 마지막 호출만" loading을 갱신하게 한다.
+  let loadGeneration = 0;
+
   async function loadAndShow(url) {
     if (!pdfViewer) return;
+    const myGeneration = ++loadGeneration;
     loading = true;
     error = '';
     closePopups();
@@ -1352,7 +1359,10 @@
       pageLabels = await doc.getPageLabels().catch(() => null);
       await loadHighlights();
       await loadInk();
-      // 나머지(배율 계산/loading 해제)는 pagesinit 이벤트에서 처리한다.
+      // pagesinit 이벤트가 배율 계산은 처리하지만, 겹쳐 불리는 경우까지
+      // 대비해 이 호출 자신의 pagesPromise로도 loading 해제를 보장한다.
+      await pdfViewer.pagesPromise;
+      if (myGeneration === loadGeneration) loading = false;
     } catch (err) {
       error = err.message;
       errorDetail = [
@@ -1361,7 +1371,7 @@
         navigator.userAgent,
       ].join('\n');
       console.error('[PdfViewer]', err);
-      loading = false;
+      if (myGeneration === loadGeneration) loading = false;
     }
   }
 
