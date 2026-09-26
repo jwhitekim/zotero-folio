@@ -13,7 +13,7 @@
   let paper = $state(null);
   let loading = $state(true);
   let error = $state('');
-  let noteCollapsed = $state(false);
+  let noteCollapsed = $state(true);
   // 첨부파일 교체 후 뷰어가 새 파일을 다시 불러오게 하는 캐시버스터.
   // contentUrl 쿼리에 붙여서 값이 바뀌면 PdfViewer/HtmlViewer가 재요청한다.
   let attachmentReloadToken = $state(0);
