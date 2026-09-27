@@ -1,8 +1,8 @@
 # docs/notes/ 안내
 
 Folio 개발 중 남긴 조사·결정 기록 모음입니다(SDD 문서 체계 도입 전부터
-쌓인 것). 기능 구현 자체는 `.claude/RULES.md`가 기준이고, 여기 있는
-문서들은 그 배경 설명이나 특정 버그의 조사 과정처럼 RULES.md에 다
+쌓인 것). 기능 구현 자체는 `.claude/rules/`가 기준이고, 여기 있는
+문서들은 그 배경 설명이나 특정 버그의 조사 과정처럼 rules/에 다
 담기엔 긴 내용을 옮겨둔 곳입니다. `docs/` 루트의 SDD 문서(contract/
 proposal/design/tasks/specs)와는 별개 — 상위 진입점은
 [docs/README.md](../README.md) 참고.

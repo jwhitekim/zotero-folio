@@ -34,5 +34,5 @@ Folio는 Zotero를 대체하는 도구가 아니라 보강하는 도구. 개인 
 
 ## 근거 문서
 
-- [.claude/RULES.md](../.claude/RULES.md) — 이 계약의 원본, 구현 세부
+- [.claude/rules/](../.claude/rules/) — 이 계약의 원본, 구현 세부
   규칙(코딩 컨벤션, 아키텍처, 하지 말아야 할 것)은 계속 그쪽에서 관리.

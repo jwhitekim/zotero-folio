@@ -21,6 +21,6 @@ Supabase(멀티유저 전환 이후), 인증은 Zotero OAuth, 메모 원문은 �
 | 2026-09-25 | SDD 문서 구조 도입(`docs-init`) — 기존 `docs/`는 `docs/notes/`로 이동, `docs/` 루트를 contract/proposal/design/tasks/specs가 차지 | 문서를 요구사항 단위로 관리하기 위함. 기존 조사·결정 기록은 내용 보존, `docs/notes/README.md`에서 계속 확인 가능 |
 | 2026-09-19 | 신규 기능 개발 중단, 버그 수정 위주로 전환 | 태블릿 터치 제스처 한 기능에서 실기기 피드백 대응이 여러 차례 반복되며 회귀 누적, 네이티브 핀치 기능 전체 되돌림 포함(`docs/notes/overview/scope-discipline-notes.md`) |
 | 2026-09-19 | 필기(펜/형광펜/지우개) 도구 UI 숨김 | GoodNotes로 필기하고 완성된 PDF를 Zotero 첨부파일로 교체·동기화하는 방식으로 결정 — 직접 만든 필기 도구가 GoodNotes 필기감을 따라가기 어렵다는 판단 |
-| (마이그레이션 시점) | 로컬 SQLite 단일유저 구조에서 Supabase(Postgres) + OAuth 멀티유저 구조로 전환 | `.claude/RULES.md` 아키텍처 절, `docs/notes/overview/stack-choice-and-scaling.md` 참고 |
+| (마이그레이션 시점) | 로컬 SQLite 단일유저 구조에서 Supabase(Postgres) + OAuth 멀티유저 구조로 전환 | `.claude/rules/architecture.md`, `docs/notes/overview/stack-choice-and-scaling.md` 참고 |
 
 이후 새 변경은 이 표에 계속 추가 예정.

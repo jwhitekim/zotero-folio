@@ -18,7 +18,7 @@ capability를 가로지르는 기술 결정만 기록. capability 하나에만
 ```
 
 파일별 역할(zotero.js/supabase.js/context.js/db.js/server.js) 세부는
-[.claude/RULES.md](../.claude/RULES.md) 아키텍처 절에서 관리 — 여기서
+[.claude/rules/architecture.md](../.claude/rules/architecture.md)에서 관리 — 여기서
 중복 기술 안 함.
 
 ## capability 간 공유 결정
