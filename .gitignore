@@ -6,3 +6,4 @@ data/
 # todo-guard 캐시/백업 (로컬 상태, 버전관리 불필요)
 .claude/todo-guard/
 .claude/settings.json.bak-*
+.claude/todo-guard.json

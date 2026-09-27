@@ -172,3 +172,12 @@ npm run build:web   # web 의존성 설치 + 빌드 (npm install 필요할 때)
 문서 배치는 `docs/docs-rules.md`를 따른다 — `docs/`는 SDD(contract/
 proposal/design/tasks/specs) 구조이고, SDD 도입 전 조사·결정 기록은
 `docs/notes/`에 있다.
+
+<!-- commit-and-push:auto-commit-rule:begin -->
+## 커밋 자동화
+
+기능 추가·버그 수정 작업이 검증(빌드/테스트/구문 확인 등, 프로젝트에 검증 수단이 있는
+경우)을 통과하면, 사용자의 별도 요청 없이도 로컬 커밋까지는 자동으로 실행한다
+(commit-and-push 스킬의 커밋 단계). 원격 푸시는 이 자동화에 포함되지 않으며 항상 사람
+확인을 받는다.
+<!-- commit-and-push:auto-commit-rule:end -->

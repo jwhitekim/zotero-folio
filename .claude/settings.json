@@ -5,11 +5,25 @@
   },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "bash .claude/hooks/session-start.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-start.sh"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Write|Edit|NotebookEdit|Bash",
-        "hooks": [ { "type": "command", "command": "bash .claude/hooks/pre-tool.sh" } ] }
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-tool.sh"
+          }
+        ]
+      }
     ],
     "Stop": [
       {
@@ -24,8 +38,25 @@
       },
       {
         "hooks": [
-          { "type": "command", "command": "bash .claude/hooks/check-todo.sh" },
-          { "type": "command", "command": "bash .claude/hooks/doc-check.sh" }
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/check-todo.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/doc-check.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/deploy-status-guard-hook.sh"
+          }
         ]
       }
     ]
